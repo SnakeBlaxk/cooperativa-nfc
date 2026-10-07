@@ -1,0 +1,25 @@
+/* Ajustes para navegador / celular */
+@media (max-width: 820px) {
+  .layout { flex-direction: column; height: auto; min-height: 100vh; }
+  .side { width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 8px; gap: 4px; }
+  .brand { padding: 4px 8px; } .brand small { display: none; }
+  .nav { display: flex; flex-wrap: wrap; gap: 2px; } .nav a { padding: 7px 10px; font-size: .9rem; }
+  .side .who { margin: 0 0 0 auto; border: 0; padding: 4px 8px; }
+  .main { padding: 14px; } .g2, .g3, .g4 { grid-template-columns: 1fr 1fr; }
+  .pos { grid-template-columns: 1fr; height: auto; } .login { width: 92vw; }
+  table { font-size: .85rem; } .grid[style*="minWidth"] { min-width: 0 !important; }
+}
+@media (max-width: 600px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+/* Tarjeta de cada hijo en celular: información apilada a todo lo ancho */
+@media (max-width: 600px) {
+  .kid { flex-wrap: wrap; align-items: center; gap: 12px; }
+  .kid > .avatar { width: 56px !important; height: 56px !important; }
+  .kid > .grow { flex: 1 1 calc(100% - 72px); min-width: 0; }
+  .kid > .grow h2 { font-size: 1.1rem; }
+  .kid > .grow > div { display: block; }
+  .kid > .right { flex: 1 1 100%; display: flex; justify-content: space-between; align-items: baseline; text-align: left;
+    border-top: 1px solid var(--border); padding-top: 10px; }
+  .kid .bal { font-size: 1.6rem; }
+  .main > .row h1 { font-size: 1.3rem; }
+  .main > .row .btn { width: 100%; }
+}

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+e2e-shots/
+*.db
+!test/fixtures/*.db
+*.db.tmp

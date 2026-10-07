@@ -1,0 +1,34 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { openDatabase } = require('../src/core/db');
+const { createService } = require('../src/core/service');
+const { createApi } = require('../src/core/api');
+const { seed } = require('../src/core/seed');
+
+test('API IPC: sesión, permisos y flujo con datos demo', async () => {
+  const db = await openDatabase(null);
+  seed(db);
+  const api = createApi(createService(db));
+  const s = {};
+  assert.equal(api.handle(s, 'dashboard').code, 'NO_AUTENTICADO');
+  assert.equal(api.handle(s, 'login', { username: 'maria', password: 'x' }).ok, false);
+  assert.equal(api.handle(s, 'login', { username: 'maria', password: 'tutor123' }).ok, true);
+  const kids = api.handle(s, 'listChildren').data;
+  assert.equal(kids.length, 2);
+  assert.equal(api.handle(s, 'dashboard').code, 'PROHIBIDO');
+  const all = (() => { const a = {}; api.handle(a, 'login', { username: 'admin', password: 'admin123' }); return api.handle(a, 'listChildren').data; })();
+  const vale = all.find((c) => c.full_name.startsWith('Valentina'));
+  assert.equal(api.handle(s, 'childSummary', { child_id: vale.id }).code, 'PROHIBIDO');
+  assert.equal(api.handle(s, 'constructor').code, 'NO_ENCONTRADO');
+  const c = {};
+  api.handle(c, 'login', { username: 'cajero', password: 'cajero123' });
+  const prods = api.handle(c, 'listProducts', { onlyActive: true }).data;
+  const coca = prods.find((p) => p.name.startsWith('Coca'));
+  const r = api.handle(c, 'purchase', { uid: '04A1B2C3D4E5F6', items: [{ product_id: coca.id, qty: 1 }] });
+  assert.equal(r.ok, true);
+  assert.equal(r.data.ok, false);
+  assert.equal(r.data.reason, 'Producto prohibido por el tutor: Coca-Cola 355 ml');
+  api.handle(s, 'logout');
+  assert.equal(api.handle(s, 'listChildren').code, 'NO_AUTENTICADO');
+});

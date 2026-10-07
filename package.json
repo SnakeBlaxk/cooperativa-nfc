@@ -1,0 +1,112 @@
+{
+  "name": "cooperativa-nfc",
+  "productName": "Cooperativa NFC",
+  "version": "1.0.0",
+  "description": "Sistema de cooperativa escolar con tarjetas NFC - Zuki Company",
+  "author": "Zuki Company <contacto@zuki.example>",
+  "license": "UNLICENSED",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/",
+    "seed": "node scripts/seed-cli.js",
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:mac": "electron-builder --mac dmg zip --x64 --arm64",
+    "dist:linux": "electron-builder --linux AppImage --x64",
+    "e2e": "electron scripts/e2e.js",
+    "server": "node server/index.js",
+    "e2e:web": "electron scripts/e2e-web.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.22.3",
+    "jsonwebtoken": "^9.0.3",
+    "sql.js": "^1.10.3"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "mx.zuki.cooperativanfc",
+    "productName": "Cooperativa NFC",
+    "copyright": "© 2026 Zuki Company",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "CooperativaNFC-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Cooperativa NFC",
+      "language": "2058",
+      "installerLanguages": [
+        "es_ES"
+      ],
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.business",
+      "icon": "build/icon.png",
+      "artifactName": "CooperativaNFC-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "Cooperativa NFC ${version}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Office",
+      "icon": "build/icon.png",
+      "artifactName": "CooperativaNFC-${version}-${arch}.${ext}"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
