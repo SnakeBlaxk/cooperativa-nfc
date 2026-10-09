@@ -21,6 +21,8 @@ function createApi(svc) {
     listCards: (u) => svc.listCards(u),
     registerCard: (u, a) => svc.registerCard(u, a),
     assignCard: (u, a) => svc.assignCard(u, a.card_id, a.child_id),
+    assignCardByUid: (u, a) => svc.assignCardByUid(u, a),
+    unassignCard: (u, a) => svc.unassignCard(u, a.card_id),
     setCardStatus: (u, a) => svc.setCardStatus(u, a.card_id, a.status),
     reportLostAndReplace: (u, a) => svc.reportLostAndReplace(u, a.card_id, a.new_uid),
     lookupCard: (u, a) => svc.lookupCard(u, a.uid),

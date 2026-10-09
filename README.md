@@ -2,31 +2,37 @@
 
 Sistema para la cooperativa escolar de **Zuki Company (Morelia, Michoacán)**. Cada alumno tiene una tarjeta NFC; los padres/tutores recargan saldo en la cooperativa, los niños pagan con la tarjeta y **cada movimiento queda registrado** (incluidos los intentos rechazados). Montos en **pesos mexicanos (MXN)**, guardados internamente en centavos (enteros).
 
-Consta de dos piezas que comparten la misma lógica de negocio (`src/core`):
+> ## ⚠️ El sistema funciona SOLO CON INTERNET (desde la versión 2.0)
+> Ya no existe la operación sin conexión. **Todo** (ventas, recargas, tarjetas, alumnos, límites) se registra directo en el **servidor**, así la computadora, la tableta y el celular siempre ven lo mismo al instante.
+> - Si no hay internet o el servidor no responde, en **todas** las pantallas (caja de escritorio, tableta, celular) aparece a pantalla completa: **“Sin conexión a internet. No se puede cobrar hasta que regrese la conexión.”** y no se puede cobrar, recargar ni modificar nada. El sistema **reintenta solo** cada pocos segundos y, al volver la conexión, el aviso desaparece y los datos se vuelven a cargar del servidor.
+> - **No hay cola de ventas guardadas para después.** Si una venta se estaba enviando justo cuando se cayó la conexión, se avisa que *no se pudo confirmar*: revise **Movimientos** antes de repetirla.
+> - Capturas: [`80-sin-conexion.png`](docs/capturas/v2/80-sin-conexion.png) (app) y [`83-escritorio-sin-conexion.png`](docs/capturas/v2/83-escritorio-sin-conexion.png) (caja de escritorio al arrancar sin internet).
+
+Consta de estas piezas, que comparten la misma lógica de negocio (`src/core`, ejecutada **solo en el servidor**):
 
 | Pieza | Para quién | Dónde corre | Estado |
 |---|---|---|---|
-| **App de escritorio** (Electron) | Administrador y cajero en la cooperativa (también tutores en el mismo equipo) | Windows / macOS (Linux para pruebas). Funciona **sin internet** | Completa |
-| **Servidor + app web (PWA)** (opcional) | Padres desde casa/celular/tableta; admin desde navegador | VPS, Render, Railway… con disco persistente | Completo (API, cuentas, PWA) |
-| **Sincronización** escritorio ↔ servidor | Automática | Cada 45 s + unos segundos después de cada venta + botón “Sincronizar ahora” | Completa (ver sección 5) |
+| **Servidor + app web (PWA)** | Todos: administrador, cajero, padres y superadministrador, desde computadora, tableta o celular | Render (https://cooperativa-nfc.onrender.com), VPS, Railway… | Completo |
+| **Caja de escritorio** (Electron) | Administrador y cajero en la cooperativa | Windows / macOS (Linux para pruebas). **Cliente en línea**: abre la app del servidor y agrega el lector NFC PC/SC. **Requiere internet** | Completa |
 | **Multi-escuela** + panel de **superadministrador** | Zuki Company (dueña de la plataforma) | En el servidor / PWA | Completo (ver sección 1b) |
 
 > **Guía paso a paso para poner en marcha una escuela (lenguaje sencillo): [`GUIA_ARRANQUE_ESCUELA.md`](GUIA_ARRANQUE_ESCUELA.md).**
 
-Forma de operar recomendada: la **caja de escritorio** vende y recarga (funciona sin internet) y se sincroniza con el **servidor**, donde los padres consultan saldo/historial y configuran límites, prohibidos y bloqueos desde su celular. También puede operarse solo con el escritorio (sin servidor) o solo con el servidor (sin caja de escritorio vinculada).
+Forma de operar: la cooperativa cobra y recarga desde la **caja de escritorio** o desde el **navegador / tableta** (es la misma app); los padres consultan saldo e historial y configuran límites, prohibidos y bloqueos desde su celular. Todo pasa por el servidor en ese momento.
 
 ---
 
 ## 1. Funciones
 
 **Administrador**
-- Panel: ventas del día / semana / mes, recargas, tarjetas activas, saldo total en tarjetas, rechazos del día, productos más vendidos y gráfica de ventas por día (SVG, sin internet).
+- Panel: ventas del día / semana / mes, recargas, tarjetas activas, saldo total en tarjetas, rechazos del día, productos más vendidos y gráfica de ventas por día (SVG).
 - Productos: alta, edición, precio, categoría, activar/desactivar, eliminar (si tiene ventas solo se desactiva). Categorías.
-- Tarjetas: registrar UID (con lector o a mano), asignar a alumno, bloquear/activar, **reportar perdida y transferir saldo** a una tarjeta nueva, ajustes de saldo con motivo.
-- Tutores y alumnos: altas, edición, foto opcional, límites y prohibiciones de cualquier alumno.
+- Tarjetas: registrar UID (con lector o a mano), asignar a alumno, bloquear/activar, **reportar perdida y transferir saldo** a una tarjeta nueva, quitar tarjeta (regresa al inventario si tiene saldo $0), ajustes de saldo con motivo. En *Tarjetas* se elige el alumno (opcional) y se pasa la tarjeta: **Enter registra/asigna**. No se permiten UID repetidos.
+- **Asignar tarjeta desde el alumno** (*Alumnos y padres → 🪪 Asignar tarjeta* o pestaña *Tarjeta y perfil*): campo con **foco automático** donde se escribe el UID a mano o se pasa la tarjeta por un **lector USB tipo teclado de 125 kHz** (o NFC); **Enter asigna**. Si la tarjeta es nueva se registra; si ya es de otro alumno, se avisa. Con tarjeta: **Bloquear/Desbloquear, Reemplazar** (perdida o dañada; el saldo pasa a la nueva) y **Quitar**. Funciona igual en la web/tableta y en la caja. Captura: [`82-asignar-tarjeta.png`](docs/capturas/v2/82-asignar-tarjeta.png).
+- Tutores y alumnos: altas, edición, foto opcional. **Los límites de gasto y productos prohibidos solo los configura el padre/madre/tutor**; la escuela (administrador y cajero) solo los **consulta** (pestaña *Límites y prohibidos (del tutor)*, solo lectura; el servidor responde 403 si lo intentan). Captura: [`85-admin-limites-solo-lectura.png`](docs/capturas/v2/85-admin-limites-solo-lectura.png).
 - Usuarios (admin, cajero, tutor); las contraseñas las asigna únicamente el superadministrador (se muestran una sola vez).
 - Movimientos con filtros (fechas, tipo, estado, alumno, tarjeta) y exportación a CSV.
-- Respaldo de la base de datos (escritorio).
+- Respaldo de la base de datos: lo descarga el superadministrador desde el servidor.
 - En la PWA: **códigos de invitación** por alumno y alta de tutores con contraseña generada (se muestra una vez y se puede enviar por correo/SMS).
 
 **Cajero / punto de venta**
@@ -49,7 +55,7 @@ Zuki Company vende el sistema a varias escuelas. Un solo servidor atiende a toda
 
 | Panel | Quién | Qué ve |
 |---|---|---|
-| **Superadministrador** (`superadmin`) | Zuki Company | **Escuelas**: lista de escuelas con estado (*Prueba / Activa / Pausada*) y **mensualidad** (días restantes, vencidas resaltadas; §1c), alta/edición, registrar pago, pausar/reactivar, alta del administrador de cada escuela con contraseña generada, usuarios (asignar contraseña, activar/desactivar), estadísticas por escuela (ventas, recargas, tarjetas activas, alumnos, padres vinculados, saldo, **última sincronización de su caja**) y **totales globales**, cajas vinculadas (revocar, hacer principal), **hoja de códigos de invitación** por escuela, nota de plan/cuota. Además **Cuentas, Seguridad y emergencia, Alertas y Bitácora** (§4b). No opera ventas ni ve el panel de ninguna escuela (`/api/rpc` le responde 403). |
+| **Superadministrador** (`superadmin`) | Zuki Company | **Escuelas**: lista de escuelas con estado (*Prueba / Activa / Pausada*) y **mensualidad** (días restantes, vencidas resaltadas; §1c), alta/edición, registrar pago, pausar/reactivar, alta del administrador de cada escuela con contraseña generada, usuarios (asignar contraseña, activar/desactivar), estadísticas por escuela (ventas, recargas, tarjetas activas, alumnos, padres vinculados, saldo, y **totales globales**, cajas vinculadas (revocar, hacer principal), **hoja de códigos de invitación** por escuela, nota de plan/cuota. Además **Cuentas, Seguridad y emergencia, Alertas y Bitácora** (§4b). No opera ventas ni ve el panel de ninguna escuela (`/api/rpc` le responde 403). |
 | **Escuela** (`admin`, `cajero`) | Personal de cada escuela | Solo su escuela: alumnos, tarjetas, productos/categorías, movimientos, tablero, usuarios (su personal y los tutores con hijos en su escuela), invitaciones y cajas. Un id o UID de otra escuela responde **404 (no encontrado)**. |
 | **Padres** (`tutor`) | Padres/tutores | Solo **sus** hijos, aunque estén en **escuelas distintas** (cada hijo muestra su escuela; el catálogo para prohibir productos es el de la escuela de ese hijo). |
 
@@ -83,19 +89,19 @@ Cada escuela tiene un **estado** y un **periodo pagado** (*fecha inicio* y *fech
 - **Registrar pago / renovar** (superadmin → Escuelas → Administrar → *Mensualidad*): fecha de pago (por omisión hoy), monto y nota opcionales. Si la escuela está al corriente o en tolerancia, el nuevo mes se cuenta **desde el fin anterior** (paga lo atrasado); si estaba pausada o ya había pasado la tolerancia, el mes empieza **hoy**. Una escuela en Prueba pasa a Activa. Queda en el **historial de pagos**.
 - **Pausar ahora**, **Reactivar** y **Cambiar estado o fechas** (p. ej. alargar una prueba) están en el mismo recuadro. Todo queda en la **Bitácora** (filtro *Mensualidad*) y genera **Alertas** (por vencer, tolerancia, pausada).
 - La revisión se hace al iniciar sesión, en cada petición, en cada sincronización de caja y cada 15 min en el servidor (también al arrancar), así que la pausa ocurre aunque nadie entre.
-- **Caja de escritorio**: en cada sincronización recibe el aviso (vence/tolerancia) y lo muestra al administrador y cajero. Si el servidor responde que la escuela está **pausada**, la caja muestra “Servicio pausado” y **bloquea ventas, recargas y cualquier cambio** (se puede consultar). **Sin internet la caja sigue funcionando hasta la siguiente sincronización** que logre conectarse: no puede saber de la pausa sin hablar con el servidor. Una vez marcada como pausada, sigue bloqueada aunque se quede sin internet, hasta que una sincronización confirme que se reactivó. Con internet, el inicio de sesión en la caja también se rechaza mientras esté pausada.
+- **Caja de escritorio**: es la misma app web del servidor, así que el aviso y la pausa se aplican al instante igual que en el navegador (no hay operación sin internet).
 - **Migración de escuelas existentes** (automática al arrancar la nueva versión, una sola vez, sin borrar nada): todas pasan a **Prueba con 30 días desde ese día**, para que ninguna se pause de improviso. Las que estaban *suspendidas* quedan **Pausadas**. El superadministrador debe registrar el pago de las que ya pagan (pasan a Activa).
 
 ## 2. Instalación para usuarios finales
 
 ### Windows 10/11
-1. Descargue `CooperativaNFC-Setup-1.0.0.exe`.
+1. Descargue `CooperativaNFC-Setup-2.0.0.exe`.
 2. Ábralo. Como el instalador **no está firmado** con certificado de código, Windows SmartScreen puede mostrar *“Windows protegió su PC”*: haga clic en **Más información → Ejecutar de todas formas**.
 3. Elija la carpeta de instalación y termine. Se crean accesos en el Escritorio y en el menú Inicio.
-4. La base de datos queda en `%APPDATA%\Cooperativa NFC\cooperativa.db` (no se borra al desinstalar).
+4. La caja **no guarda datos en la computadora**: todo está en el servidor. Solo guarda la dirección del servidor en `%APPDATA%\Cooperativa NFC\config.json`.
 
 ### macOS (11 o superior)
-1. Descargue el archivo para su Mac: `CooperativaNFC-1.0.0-arm64.dmg/.zip` (Apple Silicon M1/M2/M3/M4) o `-x64` (Intel).
+1. Descargue el archivo para su Mac: `CooperativaNFC-2.0.0-arm64.dmg/.zip` (Apple Silicon M1/M2/M3/M4) o `-x64` (Intel).
 2. Arrastre **Cooperativa NFC** a *Aplicaciones*.
 3. Si la app no está firmada/notarizada, macOS dirá que *“no se puede abrir porque proviene de un desarrollador no identificado”* o que *“está dañada”*. Solución:
    - Clic derecho sobre la app → **Abrir** → **Abrir**; o en *Ajustes del Sistema → Privacidad y seguridad* → **Abrir igualmente**.
@@ -104,14 +110,14 @@ Cada escuela tiene un **estado** y un **periodo pagado** (*fecha inicio* y *fech
      xattr -cr "/Applications/Cooperativa NFC.app"
      codesign --force --deep --sign - "/Applications/Cooperativa NFC.app"
      ```
-4. La base queda en `~/Library/Application Support/Cooperativa NFC/cooperativa.db`.
+4. Igual que en Windows, no hay base local (solo `config.json` con la dirección del servidor).
 
-### Primer uso
-La primera vez la app pregunta cómo empezar:
-- **Cargar datos de demostración** (usuarios, alumnos, tarjetas, productos y movimientos de ejemplo; ideal para capacitar).
-- **Empezar con base vacía**: se crea el usuario `admin` con una **contraseña aleatoria de 12 caracteres** que se muestra una sola vez en un cuadro (anótela).
-
-Para volver a empezar, cierre la app y borre (o renombre) el archivo `cooperativa.db` indicado arriba.
+### Primer uso (caja de escritorio)
+- Al abrir, la caja se conecta a **https://cooperativa-nfc.onrender.com** y muestra la misma pantalla de entrada que la web. Se entra con la cuenta del servidor (admin o cajero).
+- Para usar otro servidor: menú **Archivo → Servidor…** (o el botón *Cambiar servidor…* de la pantalla sin conexión). También con la variable `COOP_SERVER_URL`.
+- Sin internet (o con el servidor caído) muestra **“Sin conexión a internet. No se puede cobrar hasta que regrese la conexión.”**, reintenta sola cada 5 s y entra en cuanto el servidor responde. El servidor gratuito de Render puede tardar ~1 min en “despertar”: mientras, se ve *Conectando con el servidor…*.
+- Lectores: los **USB tipo teclado** (125 kHz o NFC) funcionan directamente; los **PC/SC** (ACR122U) envían el UID a la app por el puente seguro de la caja (ver `INTEGRACION_NFC.md`).
+- **Cajas de la versión 1.x (sin conexión)**: ver §5 antes de actualizar, para subir sus últimas ventas.
 
 ### Credenciales de demostración
 
@@ -136,14 +142,15 @@ Tarjetas demo (UID): `04A1B2C3D4E5F6` (Sofía: Coca-Cola prohibida, límites $50
 ### Comandos
 ```bash
 npm install          # instala dependencias (descarga Electron)
-npm start            # abre la app de escritorio (crea la base demo en la carpeta userData)
-npm test             # pruebas automáticas (lógica de negocio, API IPC, autenticación del servidor)
-npm run e2e          # prueba de interfaz del escritorio (Electron, guarda capturas en e2e-shots/)
+npm start            # abre la caja de escritorio (cliente en línea; COOP_SERVER_URL=http://localhost:3000 para el servidor local)
+npm test             # pruebas automáticas (lógica de negocio, servidor, solo en línea, cuentas, tarjetas)
+npm run e2e          # caja de escritorio en línea: sin conexión, recuperación, cobro con lector PC/SC (capturas 80 y 83)
+npm run e2e:admin    # editar cuentas, Cuentas en iPad, asignar tarjeta con lector, límites solo lectura (capturas 81, 82, 84, 85)
 npm run server       # servidor + PWA en http://localhost:3000 (base en data/servidor.db, con demo)
 npm run e2e:web      # prueba de interfaz de la PWA (registro, cambio obligatorio, recuperación)
 npm run seed -- demo.db   # crea una base demo en un archivo
 ```
-Variable útil: `COOP_DB_PATH=/ruta/otra.db npm start` usa otra base (pruebas o modo portátil).
+Variables de la caja: `COOP_SERVER_URL` (servidor), `COOP_RETRY_MS` (reintento, 5000 por defecto).
 En Linux sin sandbox de Chrome (contenedores) agregue `-- --no-sandbox`.
 
 ### Estructura
@@ -153,21 +160,23 @@ src/
     db.js          Esquema SQLite, migraciones, transacciones y guardado atómico (sql.js)
     service.js     Reglas: usuarios, alumnos, tarjetas, productos, límites, compras, recargas, reportes
     auth.js        Autenticación del servidor: JWT, refresh tokens, invitaciones, recuperación, rate limit
-    sync-client.js Sincronización lado escritorio (cola sync_outbox, pull/push, estado)
-    sync-server.js Sincronización lado servidor (equipos, push idempotente, bitácora de ajustes, pull)
+    sync-client.js Sincronización de cajas 1.x (solo se usa en pruebas del modo LEGACY_SYNC)
+    sync-server.js Sincronización lado servidor; el envío (push) está desactivado salvo LEGACY_SYNC=1
     api.js         Enrutador (lista blanca de métodos) usado por IPC y por el servidor
     seed.js        Datos de demostración
-  main/            Proceso principal de Electron
-    main.js        Ventana, IPC, sesiones, respaldo, configuración del servidor
-    preload.js     Puente seguro (contextIsolation + sandbox)
-    nfc.js         Lector PC/SC opcional (nfc-pcsc) → envía UID al punto de venta por IPC
-    remote-auth.js Login de escritorio contra el servidor con respaldo sin conexión
-  renderer/        Interfaz (index.html, styles.css, app.js) — la misma se usa en la PWA
+  main/            Caja de escritorio (cliente en línea)
+    main.js        Ventana que carga la app del servidor; aviso sin conexión y reintento; menú Servidor…
+    online.js      Dirección del servidor (predeterminada Render), comprobación /api/health, navegación permitida
+    preload.js     Puente seguro (window.coopDesktop: lector PC/SC; cambio de servidor solo en páginas locales)
+    nfc.js         Lector PC/SC opcional (nfc-pcsc) → envía UID a la página por IPC
+    remote-auth.js (sin uso desde 2.0; se conserva por referencia)
+  desktop-ui/      Páginas locales de la caja: Conectando…, Sin conexión, Servidor…
+  renderer/        Interfaz (styles.css, app.js) — la sirve el servidor para web, tableta, celular y caja
 server/
   app.js, index.js Servidor Express (API REST + PWA)
   public/          index.html, coop-web.js (adaptador REST), manifest, service worker, íconos
 test/              Pruebas node:test
-scripts/           seed-cli, e2e (escritorio) y e2e-web (PWA)
+scripts/           seed-cli, e2e (caja en línea), e2e-web, e2e-admin y e2e-mensualidad (PWA)
 examples/          Script para probar un lector PC/SC
 build/             Íconos para los instaladores
 docs/capturas/     Capturas de pantalla
@@ -180,10 +189,9 @@ docs/capturas/     Capturas de pantalla
 
 ## 4. Cuentas, inicio de sesión y seguridad
 
-### Escritorio (local, sin internet)
-- Usuarios en la base local, contraseñas con **bcrypt**. La sesión vive en el proceso principal (el renderer nunca decide el rol); cada operación valida el rol en `service.js`.
-- **Solo el superadministrador cambia contraseñas** (ver §4b). En el escritorio sin servidor la contraseña del `admin` se genera al crear la base; con servidor, las contraseñas vienen del servidor al iniciar sesión.
-- **Con servidor configurado** (*Ajustes → Servidor en la nube*): el admin/cajero inicia sesión con su cuenta **del servidor**. Si el servidor acepta, la cuenta se copia/actualiza en la base local (hash bcrypt) para poder entrar **sin internet** después. Si el servidor rechaza la contraseña, se rechaza. Si el servidor no responde (5 s), se usa el login local (*modo sin conexión*). Las cuentas de tutor siguen funcionando localmente. 
+### Caja de escritorio
+- No tiene usuarios ni base local: se entra con la cuenta **del servidor** (misma pantalla que la web) y la sesión se guarda como en el navegador (refresh token). Cada operación la valida el servidor.
+- **Solo el superadministrador cambia contraseñas** (ver §4b).
 
 ### Servidor / PWA
 - **Altas de tutores**: (1) el admin crea la cuenta con correo o teléfono y el servidor genera una **contraseña** (se muestra una sola vez, con botón para copiar, y se envía por el *mailer*). (2) El admin genera un **código de invitación por alumno** (`COOP-XXXX-XXXX`, vence en 30 días, un solo uso; generar otro invalida el anterior) que se entrega con la tarjeta; el padre se **autoregistra** en la PWA y queda vinculado. Un tutor ya registrado puede vincular más hijos con otro código. Si el alumno ya tenía tutor, el código transfiere la vinculación.
@@ -214,6 +222,7 @@ docs/capturas/     Capturas de pantalla
 | `TZ` | Zona horaria (por defecto `America/Mexico_City`); se usa para el horario escolar y los cortes por día. |
 | `ADMIN_USER`, `ADMIN_PASSWORD`, `SCHOOL_NAME` | Opcional: crea una primera escuela con su administrador. Normalmente las escuelas se crean desde el panel del superadmin. |
 | `TRUST_PROXY=1` | Detrás de un proxy (Render, Railway, Nginx) para que el límite por IP use la IP real |
+| `LEGACY_SYNC=1` | **Solo para migrar** cajas 1.x: permite unos minutos el envío de ventas sin conexión de una caja vieja (§5). Normalmente **no** se define. |
 
 ### 4b. Seguridad y emergencia (superadministrador)
 
@@ -221,6 +230,8 @@ Menú del superadmin: **Escuelas · Cuentas · Seguridad y emergencia · Alertas
 
 - **Política de contraseñas**: solo el superadmin asigna contraseñas (*Cuentas → 🔑 Contraseña*). Se muestra **una sola vez** con botón *Copiar* y no se guarda en texto en ningún lado (bcrypt); asignarla cierra las sesiones de esa persona. Admin, cajero y tutor no tienen pantalla ni API para cambiarla (`/api/auth/change-password` ⇒ 403 para ellos). El superadmin cambia la suya en *Mi cuenta* (mín. 10 caracteres).
 - **Cuentas**: todas las cuentas de todas las escuelas con jerarquía, escuela, estado (activa/desactivada/bloqueada por intentos), último acceso (con IP) y fecha de alta; activar/desactivar y desbloquear.
+- **✏️ Editar cuenta** (botón en cada cuenta): nombre, usuario, correo, teléfono, **jerarquía** (Administrador / Cajero / Padre-tutor), **escuela** y, para padres/tutores, sus **alumnos vinculados** (buscar y *Vincular* en cualquier escuela, o *Quitar*). Usuario, correo y teléfono deben ser únicos. Si cambia usuario, jerarquía o escuela, se cierran sus sesiones. Todo cambio queda en la **Bitácora** (`cuenta_editada`, con antes/ahora y alumnos vinculados/desvinculados). En la cuenta del superadministrador solo se editan nombre, correo y teléfono (usuario y jerarquía protegidos). API: `getAccount`, `updateAccount`, `searchChildren` en `/api/super/:method`. Captura: [`81-super-editar-cuenta.png`](docs/capturas/v2/81-super-editar-cuenta.png).
+- En **tableta vertical (iPad) y pantallas angostas** la lista de Cuentas (y la de Tarjetas) se muestra como **tarjetas**, sin desbordarse y con los botones visibles: [`84-super-cuentas-ipad.png`](docs/capturas/v2/84-super-cuentas-ipad.png).
 - **Superadmin protegido**: no se puede borrar, degradar ni desactivar (triggers en SQLite además de las validaciones).
 - **Congelar recargas** (global o por escuela), **congelar ventas** y **solo lectura** por escuela. Las cajas de escritorio vinculadas reciben estas banderas en cada sincronización y bloquean localmente.
 - **Bloquear administradores** de una escuela (desactiva y cierra sus sesiones) y **cerrar sesiones** por escuela o de todos (incrementa `token_version`, lo que invalida los JWT al instante).
@@ -239,56 +250,22 @@ Menú del superadmin: **Escuelas · Cuentas · Seguridad y emergencia · Alertas
 
 ---
 
-## 5. Sincronización escritorio ↔ servidor
+## 5. Cajas de la versión 1.x (sincronización sin conexión) — RETIRADA
 
-### Configurar (una vez)
-1. Despliegue el servidor **vacío** (`NODE_ENV=production`, sin datos demo) con `SUPERADMIN_USER`/`SUPERADMIN_PASSWORD`. El superadmin crea la escuela en **Escuelas → + Nueva escuela** y entrega al administrador de la escuela su usuario y contraseña.
-2. En la caja: *Ajustes → Servidor en la nube y sincronización*: escriba la URL, el usuario y la contraseña **del administrador de la escuela** y pulse **Vincular este equipo** (la caja queda ligada a esa escuela y toma su nombre). La contraseña no se guarda: el servidor entrega un **token de equipo** (guardado en `config.json` de la carpeta de datos, revocable desde el servidor).
-3. La primera sincronización envía **todo** lo existente (catálogo, alumnos, tarjetas con saldo, límites, prohibiciones e historial completo). Después se envían solo los cambios.
-4. En la PWA el administrador genera los **códigos de invitación** de cada alumno (los alumnos ya llegaron desde la caja) y se los entrega a los padres.
+Desde la versión 2.0 **no hay sincronización**: la caja es un cliente en línea y el servidor es la única fuente de verdad.
 
-### Qué viaja y quién gana
-| Dato | Dirección | Regla |
-|---|---|---|
-| Movimientos (compras, recargas, ajustes, **incluidos los rechazados**) con sus partidas | caja → servidor | El escritorio es la fuente de verdad. Inmutables, **idempotentes por UUID** (reenviar no duplica). |
-| Tarjetas (UID, alumno, estado, **saldo**) | caja → servidor | El saldo del servidor se reemplaza por el del escritorio, así que **refleja siempre a la caja**. |
-| Alumnos (nombre, grado, foto, activo), productos, categorías | caja → servidor | Upsert por UUID. |
-| Límites y prohibiciones (productos y categorías) | ambos sentidos | **Gana el servidor**: si el tutor cambió algo en el servidor después de la última descarga de la caja, se descarta lo enviado por la caja y la caja adopta el valor del servidor. |
-| Bloqueo/desbloqueo de tarjeta por el tutor | servidor → caja | Gana el servidor; excepción: una tarjeta reportada **perdida** en la caja siempre queda perdida. |
-| Perfil del alumno editado por el tutor (nombre/foto) | servidor → caja | Gana el servidor. |
-| Vínculo tutor ↔ alumno y datos del tutor | servidor → caja | Gana el servidor. La caja crea una cuenta local del tutor sin contraseña utilizable (los padres usan la PWA; el admin puede asignarle una). |
-
-Cada ciclo: **1) descarga** (pull) los ajustes cambiados desde el último cursor; **2) envía** (push) la cola local `sync_outbox` en lotes de 400. Los cambios se registran con *triggers* de SQLite en la caja; los cambios aplicados desde el servidor no se vuelven a encolar.
-
-### Sin internet
-La caja sigue vendiendo y recargando con su base local; los cambios se acumulan en la cola y se envían solos al volver la conexión. El indicador del menú lateral muestra el estado: *Sincronizado HH:MM*, *Sincronizando…*, *Sin conexión · N pendientes*, *Solo lectura*, *Otro equipo es el principal* o *Error*. Clic en el indicador = sincronizar ahora. *Ajustes* muestra la última sincronización, pendientes, equipo y resultado del último ciclo. Mientras la caja está sin conexión, los cambios que hagan los padres se aplican en la caja en cuanto se reconecta.
-
-### Varios equipos (criterio conservador)
-- Solo **un equipo principal por escuela** puede enviar datos (el primero que sincroniza). Otros equipos vinculados quedan en **solo lectura**: descargan los ajustes pero **sus ventas no se envían** (el servidor responde 409). Así se evita que dos cajas sobrescriban saldos de la misma tarjeta.
-- Para cambiar de caja (p. ej. computadora nueva): en la nueva, *Vincular* y luego **Hacer principal** (requiere admin del servidor). Lo ideal es restaurar antes en la nueva el respaldo de la caja anterior.
-- Con una caja vinculada, el servidor **rechaza** en la PWA las operaciones que pertenecen a la caja (ventas, recargas, ajustes, alta/asignación de tarjetas, alumnos, productos y categorías) con el código `SOLO_ESCRITORIO`.
-- Varias cajas vendiendo simultáneamente con saldos compartidos **no está soportado** (ver `PENDIENTES.md`).
-
-### Endpoints de sincronización
-Autenticación: encabezado `X-Device-Token: <token>` (o `Authorization: Bearer <JWT de admin/cajero>` + `X-Device-Id` de un equipo vinculado).
-
-| Método y ruta | Quién | Descripción |
-|---|---|---|
-| `POST /api/sync/devices` | admin (JWT) | `{device_id, name}` → `{device_token}` vincula un equipo |
-| `GET /api/sync/devices` | admin | lista de equipos (principal, último contacto) |
-| `POST /api/sync/devices/:id/primary` | admin | convierte un equipo en principal |
-| `POST /api/sync/devices/:id/revoke` | admin | revoca un equipo |
-| `GET /api/sync/status` | equipo | `{is_primary, primary_device, school_name, school_status}` |
-| `POST /api/sync/invitations` | equipo | `{child_uuids, include_linked?}` → códigos de invitación de alumnos **de su escuela** (reutiliza los vigentes) |
-| `GET /api/sync/pull?cursor=N` | equipo | `{cursor, changes:[{entity: limits|prohibitions|card_status|child_profile|child_link, ...}]}` |
-| `POST /api/sync/push` | equipo principal | `{pulled_cursor, entities:{categories, products, children, cards, limits, prohibitions, transactions}}` → estadísticas (`duplicates`, `conflicts_server_wins`) |
-
----
+- El servidor **rechaza** el envío de datos de cajas viejas: `POST /api/sync/push` responde **410 `VERSION_OBSOLETA`** (*“Esta versión de la caja ya no se usa: el sistema ahora funciona solo con internet…”*). Así una caja vieja no puede sobrescribir saldos registrados en línea. Las demás rutas `/api/sync/*` (vincular, estado, pull) siguen respondiendo para no romper cajas viejas, pero no son necesarias.
+- Ya no existe el bloqueo `SOLO_ESCRITORIO`: con o sin caja vieja vinculada, ventas, recargas, tarjetas, alumnos y productos se registran desde la web/tableta y desde la caja nueva.
+- **Cómo cambiar una escuela que usaba la caja 1.x** (hacerlo en este orden):
+  1. **Antes de desplegar** la versión nueva del servidor, abra la caja vieja con internet y presione **“Sincronizar ahora”** hasta que diga *Sincronizado* y *0 pendientes*. (Si el servidor nuevo ya está desplegado, ponga temporalmente `LEGACY_SYNC=1` en Render, sincronice la caja vieja y **quite la variable**.)
+  2. Desinstale la caja vieja e instale `CooperativaNFC-Setup-2.0.0.exe`. Entre con la cuenta del servidor.
+  3. Si alguna escuela no tenía servidor (solo caja local), sus datos locales **no se migran solos**: hay que vincularla una vez con la caja 1.x y `LEGACY_SYNC=1` para subirlos.
+- `LEGACY_SYNC=1` reactiva el comportamiento anterior (incluido el bloqueo `SOLO_ESCRITORIO` mientras exista una caja principal). Úselo solo unos minutos para la migración.
 
 ## 6. API
 
-### Escritorio (IPC)
-El renderer llama `window.coop.call(metodo, args)`; el proceso principal agrega el usuario de la sesión y ejecuta `api.handle`. Respuesta: `{ ok: true, data }` o `{ ok: false, error, code }`.
+### Interfaz (web, tableta y caja)
+La interfaz llama `window.coop.call(metodo, args)` (`server/public/coop-web.js`), que usa la API REST. Respuesta: `{ ok: true, data }` o `{ ok: false, error, code }`. Sin conexión responde `{ ok:false, code:'SIN_CONEXION' }` **sin enviar nada** y muestra el aviso a pantalla completa. Las respuestas de `/api/*` llevan `Cache-Control: no-store` y el *service worker* solo guarda la interfaz estática (nunca datos).
 
 ### Servidor (REST, JSON)
 Autenticación: `Authorization: Bearer <access_token>`. Errores: `{ ok:false, error, code }` con HTTP 400 `VALIDACION`, 401 `NO_AUTENTICADO`, 403 `PROHIBIDO`/`DEBE_CAMBIAR_PASSWORD`, 404, 409 `DUPLICADO`, 429 `LIMITE_INTENTOS`.
@@ -356,9 +333,9 @@ Artefactos en `dist/`. Los instaladores **no están firmados** (ver abajo).
 
 ```bash
 npm install
-npm run dist:win     # Windows x64 → dist/CooperativaNFC-Setup-1.0.0.exe (NSIS, en español)
+npm run dist:win     # Windows x64 → dist/CooperativaNFC-Setup-2.0.0.exe (NSIS, en español)
 npm run dist:mac     # macOS → dist/*.dmg y *.zip para x64 y arm64 (requiere una Mac)
-npm run dist:linux   # Linux → dist/CooperativaNFC-1.0.0-x86_64.AppImage (pruebas)
+npm run dist:linux   # Linux → dist/CooperativaNFC-2.0.0-x86_64.AppImage (pruebas)
 ```
 - **Windows desde Linux**: requiere Wine con soporte de 32 bits (Debian/Ubuntu: `sudo dpkg --add-architecture i386 && sudo apt update && sudo apt install wine wine32:i386`). Desde Windows no se necesita nada extra.
 - **macOS**: el `.dmg` solo se genera en una Mac (usa `hdiutil`). En una Mac con Xcode Command Line Tools (`xcode-select --install`):
@@ -403,7 +380,8 @@ Otras opciones: **VPS** (DigitalOcean, Hetzner, Lightsail; ~5 USD/mes) con Node 
 
 ## 9. Pruebas realizadas
 
-- `npm test`: **54 pruebas, 54 aprobadas**. **`test/billing.test.js`** (8 pruebas, mensualidad): fechas en hora de CDMX, aviso/tolerancia/pausa automática, sesiones cerradas y nadie de la escuela entra (padre con otra escuela activa sí), datos intactos, pago/renovación e historial, pausar/reactivar, revisión periódica, caja de escritorio marcada como pausada y migración de escuelas existentes. Incluye las anteriores (multi-escuela, límites, prohibidos, tarjetas, autenticación, refresh tokens, invitaciones, sincronización) y **`test/security.test.js`** (10 pruebas): cuentas y contraseñas solo por superadmin, superadmin imborrable/no degradable, bloqueo por intentos y recuperación por variable de entorno, congelar recargas/ventas, solo lectura y límite diario, bloquear administradores y cerrar sesiones (JWT invalidados), ALERTA ROJA (logins bloqueados salvo superadmin), alertas de anomalías y reversión, papelera y respaldo, persistencia en Turso con un servidor falso, y caja de escritorio que recibe las banderas y genera alertas al sincronizar.
+- **Versión 2.0 (solo en línea)**: `npm test` → **70 pruebas, 70 aprobadas**. Nuevas: **`test/online-only.test.js`** (11): el servidor rechaza el envío de cajas viejas (410), se cobra y recarga en línea aunque hubiera una caja vieja principal, API sin caché, hoja de códigos en línea, el adaptador web bloquea ventas/recargas sin internet (sin enviar nada ni guardarlas), se recupera al volver la conexión, el *service worker* nunca sirve datos, dirección del servidor de la caja y detección de servidor caído. **`test/admin-features.test.js`** (5): límites/prohibidos solo del tutor (403 para admin/cajero), edición de cuentas por el superadmin (usuario/correo/teléfono únicos, bitácora, cuenta protegida, alumnos del tutor) y asignación de tarjetas por UID sin duplicados. `npm run e2e` (caja en línea), `npm run e2e:admin`, `npm run e2e:web` y `npm run e2e:mensualidad`: OK.
+- Versión 1.x: `npm test`: **54 pruebas, 54 aprobadas**. **`test/billing.test.js`** (8 pruebas, mensualidad): fechas en hora de CDMX, aviso/tolerancia/pausa automática, sesiones cerradas y nadie de la escuela entra (padre con otra escuela activa sí), datos intactos, pago/renovación e historial, pausar/reactivar, revisión periódica, caja de escritorio marcada como pausada y migración de escuelas existentes. Incluye las anteriores (multi-escuela, límites, prohibidos, tarjetas, autenticación, refresh tokens, invitaciones, sincronización) y **`test/security.test.js`** (10 pruebas): cuentas y contraseñas solo por superadmin, superadmin imborrable/no degradable, bloqueo por intentos y recuperación por variable de entorno, congelar recargas/ventas, solo lectura y límite diario, bloquear administradores y cerrar sesiones (JWT invalidados), ALERTA ROJA (logins bloqueados salvo superadmin), alertas de anomalías y reversión, papelera y respaldo, persistencia en Turso con un servidor falso, y caja de escritorio que recibe las banderas y genera alertas al sincronizar.
 - `npm run e2e:mensualidad`: panel de mensualidad del superadmin, avisos de vencimiento y tolerancia para admin/cajero (no para padres) y mensaje de servicio pausado; capturas `docs/capturas/v2/70-…77-*.png`.
 - `npm run e2e:web` y `npm run e2e` (con `xvfb-run` en Linux): recorren todas las pantallas por rol con el diseño v2 y guardan capturas en `docs/capturas/v2/`; verifican que el inicio de sesión no muestra credenciales, que el superadmin asigna una contraseña y el cajero entra con ella, ALERTA ROJA y desbloqueo, que admin/cajero no pueden cambiar contraseñas, ventas aprobadas/rechazadas, lector USB tipo teclado, sincronización con un servidor real, programar tarjetas y registro con invitación.
 

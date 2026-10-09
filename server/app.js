@@ -14,8 +14,10 @@ const { createSyncServer } = require('../src/core/sync-server');
 const { createSecurity } = require('../src/core/security');
 const { createBilling } = require('../src/core/billing');
 
-// Métodos que, con una caja de escritorio sincronizada, solo se hacen en el escritorio (fuente de verdad)
-const DESKTOP_OWNED = ['purchase', 'recharge', 'adjust', 'registerCard', 'assignCard', 'reportLostAndReplace', 'createProduct', 'updateProduct', 'deleteProduct', 'createCategory', 'createChild'];
+// Métodos que, con una caja VIEJA sincronizada (solo si LEGACY_SYNC=1), se hacían solo en el escritorio.
+// En el modo normal (solo en línea) el servidor es la única fuente de verdad y estos métodos se usan desde
+// la web y la caja de escritorio nueva (que es un cliente en línea).
+const DESKTOP_OWNED = ['purchase', 'recharge', 'adjust', 'registerCard', 'assignCard', 'assignCardByUid', 'unassignCard', 'reportLostAndReplace', 'createProduct', 'updateProduct', 'deleteProduct', 'createCategory', 'createChild'];
 
 async function createServer(opts = {}) {
   const db = opts.db || await openDatabase(opts.dbPath || null);
@@ -47,7 +49,7 @@ async function createServer(opts = {}) {
     if (!row) db.run("INSERT INTO meta (key, value) VALUES ('dev_jwt_secret', ?)", [secret]);
     console.warn('[auth] JWT_SECRET no definido: usando secreto de desarrollo guardado en la base.');
   }
-  const sync = createSyncServer(db);
+  const sync = createSyncServer(db, { legacySync: opts.legacySync !== undefined ? !!opts.legacySync : process.env.LEGACY_SYNC === '1' });
   const persistence = opts.persistence || (() => ({ mode: opts.dbPath ? 'archivo' : 'memoria' }));
   const security = createSecurity(db, { svc, sync, persistence });
   sync.hooks.onRecharge = (id) => security.inspectRecharge(id);
@@ -73,10 +75,12 @@ async function createServer(opts = {}) {
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
     res.set({ 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer' });
+    // Los datos nunca se guardan en caché (ni navegador ni service worker): siempre al día
+    if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     next();
   });
 
-  const STATUS = { BLOQUEADO_SEGURIDAD: 423, SISTEMA_BLOQUEADO: 403, OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, ESCUELA_PAUSADA: 403, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, LIMITE_INTENTOS: 429, INTERNO: 500 };
+  const STATUS = { BLOQUEADO_SEGURIDAD: 423, SISTEMA_BLOQUEADO: 403, OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, ESCUELA_PAUSADA: 403, VERSION_OBSOLETA: 410, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, LIMITE_INTENTOS: 429, INTERNO: 500 };
   const send = (res, fn) => {
     Promise.resolve().then(fn).then((data) => res.json({ ok: true, data })).catch((e) => {
       const code = e.code || 'INTERNO';
@@ -126,6 +130,17 @@ async function createServer(opts = {}) {
   app.post('/api/admin/tutors', authenticate(), requireRole('admin'), (req, res) => send(res, () => auth.createTutorAccount(req.user, req.body || {})));
   app.post('/api/admin/invitations', authenticate(), requireRole('admin'), (req, res) => send(res, () => auth.createInvitation(req.user, req.body.child_id, { reuse: !!req.body.reuse })));
   app.get('/api/admin/invitations', authenticate(), requireRole('admin'), (req, res) => send(res, () => auth.listInvitations(req.user)));
+  // Hoja de códigos para padres (Programar tarjetas → paso 3), en línea desde la web o la caja de escritorio
+  app.post('/api/admin/invitation-sheet', authenticate(), requireRole('admin'), (req, res) => send(res, () => {
+    const sid = Number(req.user.school_id) || -1;
+    const ids = Array.isArray(req.body && req.body.child_ids) ? req.body.child_ids.map(Number).filter((n) => n > 0).slice(0, 500) : [];
+    const rows = ids.map((id) => db.get('SELECT id, uuid FROM children WHERE id = ? AND school_id = ?', [id, sid])).filter(Boolean);
+    const byUuid = new Map(rows.map((r) => [r.uuid, r.id]));
+    const codes = auth.invitationsForSchool(sid, rows.map((r) => r.uuid), { reuse: true, skipLinked: !(req.body && req.body.include_linked) })
+      .map((c) => ({ ...c, child_id: byUuid.get(c.child_uuid) }));
+    const sc = db.get('SELECT name FROM schools WHERE id = ?', [sid]) || {};
+    return { codes, school_name: sc.name || null };
+  }));
 
   // ----- sincronización con la app de escritorio -----
   // Autenticación: token de equipo (X-Device-Token) o JWT de admin/cajero + X-Device-Id de un equipo vinculado.
@@ -171,7 +186,7 @@ async function createServer(opts = {}) {
 
   // ----- lógica de negocio (misma que el escritorio). Permisos validados en el servicio -----
   // Operaciones que quedan en la bitácora (quién, cuándo, IP, qué)
-  const AUDIT_RPC = { recharge: 'recarga', adjust: 'ajuste', deleteProduct: 'producto_borrado', createUser: 'usuario_creado', updateUser: 'usuario_editado', setCardStatus: 'tarjeta_estado', reportLostAndReplace: 'tarjeta_perdida', registerCard: 'tarjeta_registrada', assignCard: 'tarjeta_asignada', updateProduct: 'producto_editado', createProduct: 'producto_creado', createChild: 'alumno_creado' };
+  const AUDIT_RPC = { recharge: 'recarga', adjust: 'ajuste', deleteProduct: 'producto_borrado', createUser: 'usuario_creado', updateUser: 'usuario_editado', setCardStatus: 'tarjeta_estado', reportLostAndReplace: 'tarjeta_perdida', registerCard: 'tarjeta_registrada', assignCard: 'tarjeta_asignada', assignCardByUid: 'tarjeta_asignada', unassignCard: 'tarjeta_quitada', updateProduct: 'producto_editado', createProduct: 'producto_creado', createChild: 'alumno_creado' };
   const SEVERITY = { recharge: 'info', adjust: 'aviso', deleteProduct: 'aviso', reportLostAndReplace: 'aviso' };
   app.post('/api/rpc/:method', authenticate(), (req, res) => {
     const method = req.params.method;

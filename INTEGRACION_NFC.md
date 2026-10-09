@@ -4,7 +4,7 @@ La app ya funciona con lectores reales: el punto de venta solo necesita **el UID
 
 ## 1. Enfoque: solo UID en la tarjeta, saldo en la base de datos
 
-- La tarjeta funciona como **identificador**. El **saldo, límites y prohibiciones viven en la base de datos** (escritorio o servidor), nunca en la tarjeta.
+- La tarjeta funciona como **identificador**. El **saldo, límites y prohibiciones viven en la base de datos** (en el servidor), nunca en la tarjeta.
 - Ventajas: si la tarjeta se pierde, se reporta y el saldo se transfiere a otra; no se puede “recargar” la tarjeta con un teléfono; no hay que escribir datos en cada venta (más rápido y sin tarjetas corruptas).
 - La app normaliza el UID: quita `:`, `-` y espacios y lo pasa a mayúsculas (`04:a1:b2…` → `04A1B2…`).
 
@@ -84,7 +84,8 @@ Limitaciones: no funciona en iPhone ni en Chrome de escritorio; la pantalla debe
 
 ## 4. Operación
 
-- **Internet**: la app de escritorio **no necesita internet** (todo es local). El servidor/PWA sí (los padres consultan desde su celular).
+- **Internet**: desde la versión 2.0 **todo requiere internet** (caja de escritorio, tableta y celular usan el servidor en línea). Sin conexión se muestra “Sin conexión a internet. No se puede cobrar hasta que regrese la conexión.” y no se cobra.
+- **Lector USB tipo teclado (125 kHz o NFC)**: funciona igual en la caja de escritorio, en el navegador y en tabletas con USB/OTG: el campo de la tarjeta tiene el foco automático y el lector “escribe” el UID y Enter. **PC/SC (ACR122U)**: solo en la caja de escritorio; el UID llega a la página por el puente seguro `window.coopDesktop`.
 - **Sin conexión con servidor configurado**: el admin/cajero puede entrar con la última contraseña válida guardada localmente.
 - **Respaldos**: *Ajustes → Crear respaldo…* guarda una copia de `cooperativa.db`. Hágalo diario (USB o nube). Para restaurar: cerrar la app y reemplazar el archivo por el respaldo con el nombre `cooperativa.db`. En el servidor, copiar `DB_PATH` diario con un cron.
 - **Corte de luz**: cada venta se guarda en disco al confirmarse (escritura atómica), por lo que una venta confirmada no se pierde. Se recomienda un **no-break (UPS)** para la computadora de la caja.
@@ -101,7 +102,7 @@ La app trata datos personales de menores (nombre, grado, foto, hábitos de consu
 - Definir plazo de conservación (p. ej. borrar o anonimizar al terminar el ciclo escolar o al dar de baja al alumno).
 
 ## 6. Próximos pasos
-Ver `PENDIENTES.md`: mejoras de la sincronización (varias cajas), recargas en línea, notificaciones a padres, app móvil, NTAG424 DNA, etc.
+Ver `PENDIENTES.md`: recargas en línea, notificaciones a padres, app móvil, NTAG424 DNA, etc.
 
 ## Programar muchas tarjetas a la vez (multi-escuela)
 
@@ -110,4 +111,4 @@ En la caja (administrador): **Programar tarjetas**.
 2. **Asignar a alumnos**: la lista de alumnos sin tarjeta (por grado y nombre) propone las tarjetas en el orden en que se leyeron; también puede tocar **Leer** junto a un alumno y acercar su tarjeta.
 3. **Hoja de códigos**: genera un PDF/impresión con un recuadro por alumno (tarjeta + código de invitación del padre).
 
-Los **UID son únicos en toda la plataforma**: una tarjeta registrada en una escuela no puede usarse en otra (al sincronizar, la caja lo avisa y no envía esa tarjeta).
+Los **UID son únicos en toda la plataforma**: una tarjeta registrada en una escuela no puede usarse en otra (el servidor responde “Esa tarjeta (UID) ya está registrada en otra escuela”).

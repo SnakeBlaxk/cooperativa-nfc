@@ -4,7 +4,7 @@
 // Independiente de Express (se prueba con node:test). Lo usa el panel del superadministrador.
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { AppError, fmtLocal, str } = require('./service');
+const { AppError, fmtLocal, str, normEmail, normPhone } = require('./service');
 
 // Métodos de la API que solo leen (todo lo demás se considera escritura)
 const READ_METHODS = new Set(['listUsers', 'listChildren', 'listCategories', 'listProducts', 'listCards', 'lookupCard', 'getLimits', 'getProhibitions', 'listMovements', 'childSummary', 'dashboard', 'securityStatus', 'me', 'login', 'logout']);
@@ -408,6 +408,81 @@ function createSecurity(db, opts = {}) {
     audit(actor, 'rol_cambiado', { school_id: u.school_id, ip: ctx.ip, target_type: 'user', target_id: u.id, details: { cuenta: u.username, antes: u.role, ahora: role }, severity: 'aviso' });
     return svc.publicUser(userOr404(u.id));
   }
+  // Detalle de una cuenta para editarla (incluye los alumnos vinculados si es padre/tutor)
+  function getAccount(actor, userId) {
+    need(actor);
+    const u = userOr404(userId);
+    const children = db.all(`SELECT c.id, c.full_name, c.grade, c.school_id, s.name AS school_name FROM children c LEFT JOIN schools s ON s.id = c.school_id
+      WHERE c.tutor_id = ? ORDER BY c.full_name`, [u.id]);
+    return { ...svc.publicUser(u), children, protected: u.role === 'superadmin' };
+  }
+  // Edición completa de una cuenta por el superadministrador: nombre, usuario, correo, teléfono,
+  // jerarquía (admin/cajero/tutor), escuela y, para padres/tutores, sus alumnos vinculados.
+  // El superadministrador solo puede editar nombre, correo y teléfono de una cuenta de superadministrador.
+  function updateAccount(actor, data = {}, ctx = {}) {
+    need(actor);
+    const u = userOr404(data.user_id);
+    const isSuper = u.role === 'superadmin';
+    const has = (k) => Object.prototype.hasOwnProperty.call(data, k) && data[k] !== undefined;
+    if (isSuper && ((has('username') && String(data.username) !== u.username) || (has('role') && data.role !== u.role)
+      || (has('school_id') && (Number(data.school_id) || null) !== (u.school_id || null)) || (has('child_ids') && Array.isArray(data.child_ids) && data.child_ids.length))) {
+      throw new AppError('En la cuenta del superadministrador solo se pueden cambiar nombre, correo y teléfono', 'PROHIBIDO');
+    }
+    const full_name = has('full_name') ? str(data.full_name, 'nombre', { max: 120 }) : u.full_name;
+    const username = !isSuper && has('username') ? str(data.username, 'usuario', { min: 3, max: 80 }) : u.username;
+    if (!/^[a-zA-Z0-9._@+-]+$/.test(username)) throw new AppError('El usuario solo puede tener letras, números y . _ - @', 'VALIDACION');
+    const email = has('email') ? (data.email ? normEmail(data.email) : null) : u.email;
+    const phone = has('phone') ? (data.phone ? normPhone(data.phone) : null) : u.phone;
+    if (has('phone') && data.phone && !phone) throw new AppError('Teléfono inválido (10 dígitos)', 'VALIDACION');
+    const role = !isSuper && has('role') ? String(data.role) : u.role;
+    if (!isSuper && !['admin', 'cajero', 'tutor'].includes(role)) throw new AppError('Jerarquía inválida (Administrador, Cajero o Padre/tutor)', 'VALIDACION');
+    let school_id = !isSuper && has('school_id') ? (data.school_id === null || data.school_id === '' ? null : Number(data.school_id)) : u.school_id;
+    if (school_id !== null && school_id !== undefined && !db.get('SELECT id FROM schools WHERE id = ?', [school_id])) throw new AppError('Escuela no encontrada', 'NO_ENCONTRADO');
+    if (['admin', 'cajero'].includes(role) && !school_id) throw new AppError('Elija la escuela de la cuenta', 'VALIDACION');
+    // Usuario, correo y teléfono únicos en toda la plataforma
+    if (db.get('SELECT id FROM users WHERE username = ? AND id <> ?', [username, u.id])) throw new AppError('Ese nombre de usuario ya existe', 'DUPLICADO');
+    if (email && db.get('SELECT id FROM users WHERE lower(email) = lower(?) AND id <> ?', [email, u.id])) throw new AppError('Ese correo ya está registrado', 'DUPLICADO');
+    if (phone && db.get('SELECT id FROM users WHERE phone = ? AND id <> ?', [phone, u.id])) throw new AppError('Ese teléfono ya está registrado', 'DUPLICADO');
+    // Alumnos vinculados (solo padres/tutores)
+    const current = db.all('SELECT id FROM children WHERE tutor_id = ?', [u.id]).map((r) => r.id);
+    let childIds = current;
+    if (has('child_ids')) {
+      if (!Array.isArray(data.child_ids) || data.child_ids.length > 50) throw new AppError('Lista de alumnos inválida', 'VALIDACION');
+      childIds = [...new Set(data.child_ids.map(Number).filter((n) => n > 0))];
+      for (const cid of childIds) if (!db.get('SELECT id FROM children WHERE id = ?', [cid])) throw new AppError('Alumno no encontrado', 'NO_ENCONTRADO');
+    }
+    if (role !== 'tutor' && childIds.length) throw new AppError('Solo un padre/tutor puede tener alumnos vinculados. Quite los alumnos antes de cambiar la jerarquía.', 'VALIDACION');
+    const added = childIds.filter((x) => !current.includes(x)); const removed = current.filter((x) => !childIds.includes(x));
+    const before = { nombre: u.full_name, usuario: u.username, correo: u.email, telefono: u.phone, rol: u.role, escuela: u.school_id };
+    const after = { nombre: full_name, usuario: username, correo: email, telefono: phone, rol: role, escuela: school_id === undefined ? null : school_id };
+    const changed = Object.keys(before).filter((k) => String(before[k] ?? '') !== String(after[k] ?? ''));
+    const sensitive = changed.some((k) => ['usuario', 'rol', 'escuela'].includes(k));
+    db.transaction(() => {
+      db.run(`UPDATE users SET full_name = ?, username = ?, email = ?, phone = ?, role = ?, school_id = ?${sensitive ? ', token_version = token_version + 1' : ''} WHERE id = ?`,
+        [full_name, username, email, phone, role, school_id === undefined ? null : school_id, u.id]);
+      if (sensitive) db.run('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [u.id]); // vuelve a entrar con sus datos nuevos
+      for (const cid of removed) db.run('UPDATE children SET tutor_id = NULL WHERE id = ? AND tutor_id = ?', [cid, u.id]);
+      for (const cid of added) db.run('UPDATE children SET tutor_id = ? WHERE id = ?', [u.id, cid]);
+    });
+    if (sync) for (const cid of [...added, ...removed]) { try { sync.recordChild('child_link', cid); } catch (_) { /* sin bitácora de sync */ } }
+    const childName = (id) => (db.get('SELECT full_name FROM children WHERE id = ?', [id]) || {}).full_name || id;
+    if (changed.length || added.length || removed.length) {
+      const details = { cuenta: u.username, cambios: changed.reduce((o, k) => ({ ...o, [k]: { antes: before[k], ahora: after[k] } }), {}) };
+      if (added.length) details.alumnos_vinculados = added.map(childName);
+      if (removed.length) details.alumnos_desvinculados = removed.map(childName);
+      audit(actor, 'cuenta_editada', { school_id: school_id || u.school_id || null, ip: ctx.ip, target_type: 'user', target_id: u.id, details, severity: sensitive || added.length || removed.length ? 'aviso' : 'info' });
+    }
+    return getAccount(actor, u.id);
+  }
+  // Alumnos para vincular a un padre/tutor (búsqueda en todas las escuelas)
+  function searchChildren(actor, f = {}) {
+    need(actor);
+    const w = []; const p = [];
+    if (f.school_id) { w.push('c.school_id = ?'); p.push(Number(f.school_id)); }
+    if (f.q) { w.push('c.full_name LIKE ?'); p.push('%' + String(f.q).slice(0, 60) + '%'); }
+    return db.all(`SELECT c.id, c.full_name, c.grade, c.school_id, s.name AS school_name, c.tutor_id, t.full_name AS tutor_name FROM children c
+      LEFT JOIN schools s ON s.id = c.school_id LEFT JOIN users t ON t.id = c.tutor_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY s.name, c.grade, c.full_name LIMIT 300`, p);
+  }
   function unlockAccount(actor, userId, ctx = {}) {
     need(actor);
     const u = userOr404(userId);
@@ -466,11 +541,14 @@ function createSecurity(db, opts = {}) {
     setAccountActive: (u, a, c) => setActive(u, a.user_id, !!a.active, c),
     setAccountRole: (u, a, c) => setRole(u, a.user_id, a.role, c),
     unlockAccount: (u, a, c) => unlockAccount(u, a.user_id, c),
+    getAccount: (u, a) => getAccount(u, a.user_id),
+    updateAccount: (u, a, c) => updateAccount(u, a, c),
+    searchChildren: (u, a) => searchChildren(u, a),
   };
   return {
     methods: M, audit, alert, guard, statusFor, flagsFor, isLockdown, inspectRecharge, onLoginFailure, logoutUsers, emergencyReset, backup,
     overview, setSchoolSecurity, setGlobalFreeze, blockSchoolAdmins, logoutSchool, logoutEveryone, lockdown, unlock, listRecharges, flagRecharge, reverseRecharge,
-    listAudit, listAlerts, ackAlert, listTrash, restoreProduct, listAccounts, setPassword, setActive, setRole, unlockAccount, openAlerts,
+    listAudit, listAlerts, ackAlert, listTrash, restoreProduct, listAccounts, setPassword, setActive, setRole, unlockAccount, openAlerts, getAccount, updateAccount, searchChildren,
   };
 }
 

@@ -24,3 +24,14 @@
   .kid .bal { font-size: 1.7rem; }
   .pagehead .actions .btn { width: 100%; }
 }
+/* Sin conexión: aviso a pantalla completa. Bloquea cobros, recargas y cualquier cambio (solo en línea). */
+#offline-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: rgba(17, 24, 39, .82); backdrop-filter: blur(2px); }
+#offline-overlay[hidden] { display: none; }
+#offline-overlay .offline-box { background: #fff; color: #1e2533; max-width: 560px; width: 100%; border-radius: 18px; padding: 32px 28px; text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,.35); border-top: 8px solid #dc2626; }
+#offline-overlay .offline-ico { font-size: 3.2rem; line-height: 1; margin-bottom: 8px; }
+#offline-overlay h2 { margin: 6px 0 10px; font-size: 1.7rem; color: #b91c1c; }
+#offline-overlay .offline-msg { font-size: 1.25rem; font-weight: 700; margin: 0 0 12px; }
+#offline-overlay .offline-sub { color: #6b7385; margin: 0 0 18px; }
+body.sin-conexion #app { pointer-events: none; user-select: none; filter: grayscale(.6); }

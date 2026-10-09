@@ -4,7 +4,8 @@
 //            SUPERADMIN_USER, SUPERADMIN_PASSWORD (dueño de la plataforma; se crea si no existe),
 //            SUPERADMIN_FORCE_CHANGE=1 (obliga a cambiarla al entrar), SUPERADMIN_RESET_PASSWORD (recuperación de emergencia),
 //            ADMIN_USER, ADMIN_PASSWORD, SCHOOL_NAME (primera escuela, opcional),
-//            TURSO_DATABASE_URL + TURSO_AUTH_TOKEN (persistencia gratis en Turso), BACKUP_DIR (copias diarias en modo disco)
+//            TURSO_DATABASE_URL + TURSO_AUTH_TOKEN (persistencia gratis en Turso), BACKUP_DIR (copias diarias en modo disco),
+//            LEGACY_SYNC=1 (solo para migrar cajas 1.x: acepta temporalmente su envío de ventas sin conexión)
 process.env.TZ = process.env.TZ || 'America/Mexico_City'; // horas de la escuela (México), también en Render
 const path = require('path');
 const fs = require('fs');

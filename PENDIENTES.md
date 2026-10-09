@@ -4,11 +4,11 @@ Lista priorizada de lo que falta o conviene pulir después de la versión 1.0.
 
 ## Alta prioridad
 0. **Guardar los datos de forma permanente en el servidor**: hoy Render gratis usa `/tmp` (se borra al reiniciar). Configurar Turso (gratis) o Render Starter + disco (≈ 7.25 USD/mes). Pasos en README §8.
-0b. Seguridad v2 — siguientes pasos: papelera también para alumnos/tarjetas/usuarios (hoy solo productos usan borrado suave; alumnos y usuarios se desactivan), verificación en dos pasos (2FA) para el superadmin, aviso por correo/WhatsApp de alertas críticas, y que la caja de escritorio aplique la reversión de una recarga automáticamente (hoy bloquea la tarjeta y la escuela hace el ajuste).
-1. **Sincronización — mejoras**: la sincronización básica ya funciona (ver README §5). Falta: varias cajas vendiendo a la vez con saldos compartidos (requiere saldo calculado en el servidor a partir de movimientos y reservas en línea), pantalla en la PWA para ver/revocar equipos y cambiar el principal, envío de fotos por separado (hoy viajan dentro del lote), compresión de lotes grandes, alerta si la caja lleva mucho tiempo sin sincronizar, y edición de productos desde la PWA (hoy el catálogo se administra en la caja).
+0b. Seguridad v2 — siguientes pasos: papelera también para alumnos/tarjetas/usuarios (hoy solo productos usan borrado suave; alumnos y usuarios se desactivan), verificación en dos pasos (2FA) para el superadmin, aviso por correo/WhatsApp de alertas críticas.
+1. **Solo en línea (2.0) — siguientes pasos**: la sincronización sin conexión se retiró. Falta: borrar del código `sync-client.js`/`remote-auth.js` y las rutas `/api/sync/*` cuando ya no queden cajas 1.x; servidor de pago en Render (el gratuito se duerme y tarda ~1 min en despertar, lo que en una caja se ve como “Conectando…”); excluir `src/core` y `sql.js` del paquete de escritorio (ya no se usan ahí).
 2. **Envío real de correos/SMS**: implementar el *mailer* con Resend / SendGrid / Amazon SES y Twilio (SMS o WhatsApp) para enviar contraseñas y avisos (la recuperación por correo está desactivada por política).
 3. **Firma de código**: certificado de Windows (OV/EV) para evitar SmartScreen, y Apple Developer ID + notarización para macOS.
-4. **Respaldos automáticos**: copia diaria programada en el escritorio (carpeta elegida o nube) y restauración desde la interfaz; en el servidor, cron + almacenamiento externo (S3/Backblaze) y prueba periódica de restauración.
+4. **Respaldos automáticos**: en el servidor, cron + almacenamiento externo (S3/Backblaze) y prueba periódica de restauración.
 5. **Aviso de privacidad y consentimiento** (LFPDPPP) integrados en el registro de la PWA, y opción de baja/anonimización de alumnos.
 
 ## Funciones
@@ -46,4 +46,4 @@ Lista priorizada de lo que falta o conviene pulir después de la versión 1.0.
 26. Accesibilidad (teclado completo, contraste) e idioma configurable.
 27. Excluir del paquete de escritorio las dependencias exclusivas del servidor (express, jsonwebtoken) para reducir tamaño.
 28. Restaurar en la caja una base descargada del servidor (útil si se descompone la computadora sin respaldo).
-29. Recargas en línea combinadas con la sincronización: el servidor debería enviar las recargas pagadas en línea a la caja (nuevo tipo de cambio en el pull) en lugar de rechazarlas.
+29. (Resuelto en 2.0: ya no hay sincronización; todo es en línea.)

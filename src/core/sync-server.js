@@ -10,6 +10,12 @@
 //  * Multi-escuela: cada equipo pertenece a UNA escuela (la del administrador que lo vinculó);
 //    todo lo que envía o descarga queda limitado a esa escuela. Los UID de tarjeta son únicos en la plataforma.
 //  * Todo es idempotente: reenviar el mismo lote no duplica nada.
+//
+// IMPORTANTE (desde la versión "solo en línea"): el sistema ya NO opera sin internet. La caja de escritorio
+// es ahora un cliente en línea del servidor (igual que la web) y cada venta/recarga va directo a la API.
+// El envío de datos desde cajas VIEJAS (push) está DESACTIVADO por defecto, porque sobrescribiría saldos
+// registrados en línea. Solo se puede reactivar temporalmente con LEGACY_SYNC=1 (opción legacySync) para
+// subir por última vez las ventas pendientes de una caja vieja antes de cambiarla a la versión nueva.
 const crypto = require('crypto');
 const { AppError, fmtLocal } = require('./service');
 
@@ -17,6 +23,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex'
 const isUuid = (u) => typeof u === 'string' && /^[0-9a-f]{32}$/.test(u);
 
 function createSyncServer(db, opts = {}) {
+  const legacySync = !!opts.legacySync; // cajas viejas con ventas sin conexión (desactivado por defecto)
   const hooks = { onRecharge: opts.onRecharge || null, checkSchool: opts.checkSchool || null };
   const ts = () => fmtLocal(new Date());
   const primaryOf = (sid) => { const r = db.get('SELECT primary_device_id AS p FROM schools WHERE id = ?', [sid]); return r ? r.p : null; };
@@ -84,7 +91,7 @@ function createSyncServer(db, opts = {}) {
     setPrimaryOf(sid, id);
     return { ok: true, primary_device: id };
   }
-  const isSynced = (schoolId) => !!(schoolId && primaryOf(schoolId));
+  const isSynced = (schoolId) => !!(legacySync && schoolId && primaryOf(schoolId));
 
   // ¿Cambió este ajuste en el servidor (por otro origen) después del último pull del equipo?
   function serverNewer(entity, key, pulledCursor, deviceId) { // las claves (uuid) ya se validaron dentro de la escuela
@@ -94,6 +101,9 @@ function createSyncServer(db, opts = {}) {
 
   // ----- push: el equipo envía sus datos -----
   function push(device, payload) {
+    if (!legacySync) {
+      throw new AppError('Esta versión de la caja ya no se usa: el sistema ahora funciona solo con internet. Instale la versión nueva de la caja (las ventas se registran directo en el servidor).', 'VERSION_OBSOLETA');
+    }
     const sid = device.school_id;
     const primary = primaryOf(sid);
     if (primary && primary !== device.id) {
@@ -236,7 +246,7 @@ function createSyncServer(db, opts = {}) {
     return { cursor: max, changes };
   }
 
-  return { registerDevice, authDevice, listDevices, revokeDevice, setPrimary, isSynced, push, pull, recordChange, recordChild, recordCard, hooks };
+  return { legacySync, registerDevice, authDevice, listDevices, revokeDevice, setPrimary, isSynced, push, pull, recordChange, recordChild, recordCard, hooks };
 }
 
 module.exports = { createSyncServer };

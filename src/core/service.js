@@ -395,6 +395,33 @@ function createService(db, opts = {}) {
     });
     return cardRow(db.get('SELECT * FROM cards WHERE id = ?', [k.id]));
   }
+  // Asigna una tarjeta a un alumno escribiendo o leyendo su UID (lector USB tipo teclado de 125 kHz o NFC):
+  // si el UID no existe se registra; si está en inventario (sin asignar) se asigna; nunca se duplica.
+  function assignCardByUid(actor, data = {}) {
+    requireRole(actor, 'admin');
+    const uid = normUid(data.uid);
+    const c = getChildOrFail(data.child_id, actor);
+    const k = db.get('SELECT * FROM cards WHERE uid = ?', [uid]);
+    if (!k) return registerCard(actor, { uid, child_id: c.id });
+    if (k.school_id !== sch(actor) && !single) throw new AppError('Esa tarjeta (UID) ya está registrada en otra escuela', 'DUPLICADO');
+    if (k.child_id === c.id && ['activa', 'bloqueada'].includes(k.status)) throw new AppError('Esa tarjeta ya está asignada a este alumno', 'DUPLICADO');
+    if (k.status === 'perdida') throw new AppError('Esa tarjeta fue reportada como perdida y no puede volver a usarse', 'VALIDACION');
+    if (k.child_id && k.child_id !== c.id && ['activa', 'bloqueada'].includes(k.status)) {
+      const other = db.get('SELECT full_name FROM children WHERE id = ?', [k.child_id]);
+      throw new AppError(`Esa tarjeta ya está asignada a ${other ? other.full_name : 'otro alumno'}. Quítesela primero.`, 'DUPLICADO');
+    }
+    return assignCard(actor, k.id, c.id);
+  }
+  // Quita la tarjeta al alumno y la regresa al inventario (solo con saldo $0; si tiene saldo, use "perdida/reemplazar")
+  function unassignCard(actor, cardId) {
+    requireRole(actor, 'admin');
+    const k = getCardOrFail(actor, cardId);
+    if (!k.child_id || k.status === 'sin_asignar') throw new AppError('La tarjeta no está asignada a ningún alumno', 'VALIDACION');
+    if (k.status === 'perdida') throw new AppError('La tarjeta está reportada como perdida', 'VALIDACION');
+    if (k.balance_cents > 0) throw new AppError('La tarjeta tiene saldo. Use "Reemplazar tarjeta" para pasar el saldo a una nueva, o haga un ajuste a $0 antes de quitarla.', 'VALIDACION');
+    db.run("UPDATE cards SET child_id = NULL, status = 'sin_asignar', blocked_by = NULL WHERE id = ?", [k.id]);
+    return cardRow(db.get('SELECT * FROM cards WHERE id = ?', [k.id]));
+  }
   function setCardStatus(actor, cardId, status) {
     requireRole(actor, 'admin', 'tutor');
     const k = getCardOrFail(actor, cardId);
@@ -464,7 +491,13 @@ function createService(db, opts = {}) {
       || { per_transaction_cents: null, per_day_cents: null, period_type: null, per_period_cents: null };
   }
   function getLimits(actor, childId) { assertChildAccess(actor, childId); return getLimitsRaw(Number(childId)); }
+  // Límites y prohibidos: SOLO el padre/madre/tutor del alumno (la escuela solo los consulta)
+  function requireTutorSetting(actor, what) {
+    requireRole(actor, 'admin', 'cajero', 'tutor');
+    if (actor.role !== 'tutor') throw new AppError(`Solo el padre, madre o tutor puede configurar ${what}. La escuela solo puede consultarlos.`, 'PROHIBIDO');
+  }
   function setLimits(actor, childId, data) {
+    requireTutorSetting(actor, 'los límites de gasto');
     const c = assertChildAccess(actor, childId, { write: true });
     const per_transaction_cents = cents(data.per_transaction_cents, 'límite por compra', { optional: true });
     const per_day_cents = cents(data.per_day_cents, 'límite diario', { optional: true });
@@ -487,6 +520,7 @@ function createService(db, opts = {}) {
     };
   }
   function setProhibitions(actor, childId, data) {
+    requireTutorSetting(actor, 'los productos prohibidos');
     const c = assertChildAccess(actor, childId, { write: true });
     const prods = Array.isArray(data.product_ids) ? [...new Set(data.product_ids.map((x) => int(x, 'producto', { min: 1 })))] : null;
     const cats = Array.isArray(data.category_ids) ? [...new Set(data.category_ids.map((x) => int(x, 'categoría', { min: 1 })))] : null;
@@ -723,7 +757,7 @@ function createService(db, opts = {}) {
     login, assertSchoolActive, findUserByIdentifier, publicUser, changePassword, createUser, updateUser, listUsers,
     listChildren, createChild, updateChild,
     listCategories, createCategory, listProducts, createProduct, updateProduct, deleteProduct,
-    listCards, registerCard, assignCard, setCardStatus, reportLostAndReplace, lookupCard,
+    listCards, registerCard, assignCard, assignCardByUid, unassignCard, setCardStatus, reportLostAndReplace, lookupCard,
     getLimits, setLimits, getProhibitions, setProhibitions,
     recharge, adjust, purchase, listMovements, childSummary, dashboard,
   };

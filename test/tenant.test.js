@@ -32,7 +32,7 @@ const sup = (m, body, token) => api('/api/super/' + m, { body: body || {}, token
 const idOf = (table, col, val) => S.db.get(`SELECT id FROM ${table} WHERE ${col} = ?`, [val]).id;
 
 async function start(opts) {
-  S = await createServer({ jwtSecret: 't'.repeat(40), mailer: consoleMailer(() => {}), ...opts });
+  S = await createServer({ jwtSecret: 't'.repeat(40), mailer: consoleMailer(() => {}), legacySync: true, ...opts });
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;
 }
@@ -76,7 +76,7 @@ test('aislamiento: el admin de la escuela A no ve ni toca datos de la escuela B 
   const cardB = idOf('cards', 'uid', '05A1A1A1A1A1A1');
   const tamal = idOf('products', 'name', 'Tamal');
   for (const [m, body] of [
-    ['childSummary', { child_id: lucia }], ['updateChild', { id: lucia, full_name: 'X' }], ['setLimits', { child_id: lucia, per_day_cents: 100 }],
+    ['childSummary', { child_id: lucia }], ['updateChild', { id: lucia, full_name: 'X' }],
     ['getProhibitions', { child_id: lucia }], ['lookupCard', { uid: '05A1A1A1A1A1A1' }], ['recharge', { uid: '05A1A1A1A1A1A1', amount_cents: 1000 }],
     ['purchase', { uid: '05A1A1A1A1A1A1', items: [{ product_id: tamal, qty: 1 }] }], ['setCardStatus', { card_id: cardB, status: 'bloqueada' }],
     ['assignCard', { card_id: cardB, child_id: idOf('children', 'full_name', 'Sofía Hernández') }], ['updateProduct', { id: tamal, price_cents: 1 }],

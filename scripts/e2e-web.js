@@ -49,7 +49,7 @@ app.whenReady().then(async () => {
     await expect('Personal de la escuela', 'detalle escuela'); await shot('11-super-escuela-detalle');
     await nav('cuentas'); await expect('Jerarquía', 'cuentas'); await expect('Superadministrador', 'cuentas superadmin'); await expect('Protegida', 'superadmin protegido');
     await shot('12-super-cuentas');
-    await js(`[...document.querySelectorAll('tr')].find(r=>r.textContent.includes('cajero')&&r.textContent.includes('Colegio Morelos')).querySelector('button').click()`); await sleep(400);
+    await js(`[...document.querySelectorAll('tr')].find(r=>r.textContent.includes('cajero')&&r.textContent.includes('Colegio Morelos')).querySelectorAll('button').forEach(b=>{ if(b.textContent.includes('Contraseña')) b.click(); })`); await sleep(400);
     await clickBtn('Asignar contraseña'); await expect('Se muestra solo esta vez', 'contraseña mostrada'); await expect('Copiar', 'botón copiar');
     await shot('13-super-contrasena-asignada');
     const newPass = await js(`document.querySelector('[data-pass]').textContent`);

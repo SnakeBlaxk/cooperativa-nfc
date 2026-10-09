@@ -1,8 +1,8 @@
 {
   "name": "cooperativa-nfc",
   "productName": "Cooperativa NFC",
-  "version": "1.0.0",
-  "description": "Sistema de cooperativa escolar con tarjetas NFC - Zuki Company",
+  "version": "2.0.0",
+  "description": "Sistema de cooperativa escolar con tarjetas NFC (solo en línea) - Zuki Company",
   "author": "Zuki Company <contacto@zuki.example>",
   "license": "UNLICENSED",
   "main": "src/main/main.js",
@@ -16,7 +16,8 @@
     "e2e": "electron scripts/e2e.js",
     "server": "node server/index.js",
     "e2e:web": "electron scripts/e2e-web.js",
-    "e2e:mensualidad": "electron scripts/e2e-mensualidad.js"
+    "e2e:mensualidad": "electron scripts/e2e-mensualidad.js",
+    "e2e:admin": "electron scripts/e2e-admin.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

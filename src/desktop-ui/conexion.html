@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Cooperativa NFC</title>
+  <link rel="stylesheet" href="conexion.css">
+</head>
+<body>
+  <main class="wrap">
+    <section id="conectando" class="box" hidden>
+      <div class="ico spin">⏳</div>
+      <h1>Conectando con el servidor…</h1>
+      <p class="sub">La caja funciona solo con internet: todas las ventas y recargas se registran directo en el servidor.</p>
+      <p class="small" data-url></p>
+    </section>
+    <section id="sin-conexion" class="box alerta" role="alert" aria-live="assertive" hidden>
+      <div class="ico">📡</div>
+      <h1>Sin conexión a internet</h1>
+      <p class="msg">Sin conexión a internet. No se puede cobrar hasta que regrese la conexión.</p>
+      <p class="sub" id="reintento">Reintentando automáticamente…</p>
+      <div class="acts">
+        <button type="button" class="btn primary" id="retry">Reintentar ahora</button>
+        <button type="button" class="btn" id="goconfig">Cambiar servidor…</button>
+      </div>
+      <p class="small">Servidor: <span data-url></span></p>
+      <p class="small" id="detalle"></p>
+    </section>
+    <section id="servidor" class="box" hidden>
+      <div class="ico">🌐</div>
+      <h1>Servidor de la cooperativa</h1>
+      <p class="sub">Dirección del servidor en internet. Normalmente no hay que cambiarla.</p>
+      <form id="form" class="form">
+        <input id="url" autocomplete="off" spellcheck="false" placeholder="https://cooperativa-nfc.onrender.com">
+        <div class="acts">
+          <button type="submit" class="btn primary">Guardar y conectar</button>
+          <button type="button" class="btn" id="default">Usar la predeterminada</button>
+          <button type="button" class="btn" id="cancel">Cancelar</button>
+        </div>
+        <p class="small" id="formmsg" role="status"></p>
+      </form>
+    </section>
+  </main>
+  <script src="conexion.js"></script>
+</body>
+</html>

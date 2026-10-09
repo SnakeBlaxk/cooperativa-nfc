@@ -23,7 +23,7 @@ const rpc = (m, body, token) => api('/api/rpc/' + m, { body: body || {}, token }
 const sup = (m, body, token) => api('/api/super/' + m, { body: body || {}, token });
 const sid = (name) => S.db.get('SELECT id FROM schools WHERE name = ?', [name]).id;
 async function start(opts = {}) {
-  S = await createServer({ jwtSecret: 'k'.repeat(40), mailer: consoleMailer(() => {}), ...opts });
+  S = await createServer({ jwtSecret: 'k'.repeat(40), mailer: consoleMailer(() => {}), legacySync: true, ...opts });
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;
 }

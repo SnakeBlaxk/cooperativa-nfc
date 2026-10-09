@@ -26,7 +26,7 @@ async function serverToken(identifier, password) {
 
 beforeEach(async () => {
   // Servidor vacío (como en producción) con admin inicial
-  S = await createServer({ jwtSecret: 's'.repeat(40), mailer: consoleMailer(() => {}), seed: false, bootstrapAdmin: ADMIN });
+  S = await createServer({ jwtSecret: 's'.repeat(40), mailer: consoleMailer(() => {}), seed: false, bootstrapAdmin: ADMIN, legacySync: true }); // modo temporal LEGACY_SYNC=1 (cajas viejas)
   S.db.run('UPDATE users SET must_change_password = 0');
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;
@@ -111,8 +111,12 @@ test('el servidor gana: cambio del tutor posterior al último pull prevalece sob
   const sofiaS = S.db.get("SELECT id FROM children WHERE full_name = 'Sofía Hernández'").id;
   const sofiaD = desk.get("SELECT id FROM children WHERE full_name = 'Sofía Hernández'").id;
   // ambos cambian el límite diario sin sincronizar entre medio
-  dsvc.setLimits(deskAdmin(), sofiaD, { per_day_cents: 9900 });
-  await api('/api/rpc/setLimits', { body: { child_id: sofiaS, per_day_cents: 2000 }, token: admin });
+  // (solo el tutor configura límites: en la caja vieja, la mamá; en el servidor, el tutor vinculado)
+  dsvc.setLimits(dsvc.login('maria', 'tutor123'), sofiaD, { per_day_cents: 9900 });
+  const inv = await api('/api/admin/invitations', { body: { child_id: sofiaS }, token: admin });
+  const tutor = (await api('/api/auth/register', { body: { code: inv.data.code, full_name: 'María H.', email: 'mariah@example.com', password: 'ClaveMaria1' } })).data.access_token;
+  assert.equal((await api('/api/rpc/setLimits', { body: { child_id: sofiaS, per_day_cents: 2000 }, token: admin })).status, 403);
+  assert.equal((await api('/api/rpc/setLimits', { body: { child_id: sofiaS, per_day_cents: 2000 }, token: tutor })).status, 200);
   await client.syncNow();
   assert.equal(S.db.get('SELECT per_day_cents AS v FROM limits WHERE child_id = ?', [sofiaS]).v, 2000);
   assert.equal(desk.get('SELECT per_day_cents AS v FROM limits WHERE child_id = ?', [sofiaD]).v, 2000);

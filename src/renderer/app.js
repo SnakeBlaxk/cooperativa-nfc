@@ -130,7 +130,7 @@
       ['Mi cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
     admin: [['Inicio', [['dashboard', 'Resumen', '📊']]],
       ['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵']]],
-      ['Escuela', [['alumnos', 'Alumnos y padres', '🧒'], ['tarjetas', 'Tarjetas', '🪪'], ...(WEB ? [] : [['programar', 'Programar tarjetas', '📶']]), ['productos', 'Productos', '🍎']]],
+      ['Escuela', [['alumnos', 'Alumnos y padres', '🧒'], ['tarjetas', 'Tarjetas', '🪪'], ['programar', 'Programar tarjetas', '📶'], ['productos', 'Productos', '🍎']]],
       ['Reportes', [['movimientos', 'Movimientos', '🧾']]],
       ['Configuración', [['usuarios', 'Personal', '👥'], ['ajustes', 'Ajustes', '⚙️']]]],
     cajero: [['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵'], ['movimientos', 'Movimientos', '🧾']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
@@ -234,7 +234,7 @@
     if (state.pausedMsg) { paused.appendChild(pausedBox(state.pausedMsg)); state.pausedMsg = null; }
     const submit = async (e) => {
       e.preventDefault(); err.textContent = ''; paused.innerHTML = '';
-      try { state.user = await call('login', { username: u.value, password: p.value }); state.view = null; render(); if (state.user && state.user.offline) toast('Servidor no disponible: sesión iniciada en modo sin conexión'); } catch (ex) {
+      try { state.user = await call('login', { username: u.value, password: p.value }); state.view = null; render(); } catch (ex) {
         if (ex.code === 'ESCUELA_PAUSADA') paused.appendChild(pausedBox()); else err.textContent = ex.message;
         p.select();
       }
@@ -553,13 +553,19 @@
   VIEWS.tarjetas = async (main) => {
     const [cards, children] = await Promise.all([call('listCards'), call('listChildren')]);
     const childOpts = (sel) => [h('option', { value: '' }, '— Sin asignar (inventario) —'), ...children.map((c) => h('option', { value: c.id, selected: sel === c.id }, `${c.full_name} (${c.tutor ? c.tutor.full_name : ''})${c.card ? ' — ya tiene tarjeta' : ''}`))];
-    const uidIn = h('input', { placeholder: 'UID: acerque la tarjeta al lector', class: 'grow' });
+    const uidIn = h('input', { placeholder: 'Pase la tarjeta por el lector o escriba el UID y presione Enter', class: 'grow', autocomplete: 'off', 'data-uid-input': '' });
     const childSel = h('select', null, childOpts(null));
+    const regMsg = h('div', { role: 'status' });
     const register = async () => {
-      const r = await safe(() => call('registerCard', { uid: uidIn.value, child_id: childSel.value ? Number(childSel.value) : null }));
-      if (r) { toast('Tarjeta registrada: ' + r.uid, 'ok'); render(); }
+      if (!uidIn.value.trim()) { uidIn.focus(); return; }
+      try {
+        const cid = childSel.value ? Number(childSel.value) : null;
+        const r = cid ? await call('assignCardByUid', { uid: uidIn.value, child_id: cid }) : await call('registerCard', { uid: uidIn.value });
+        toast(cid ? `Tarjeta ${r.uid} asignada` : 'Tarjeta registrada en inventario: ' + r.uid, 'ok'); render();
+      } catch (e) { regMsg.innerHTML = ''; regMsg.appendChild(h('div', { class: 'result err' }, e.message)); uidIn.select(); }
     };
-    uidIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); childSel.focus(); } });
+    // Lector USB tipo teclado (125 kHz o NFC): "escribe" el UID en el campo y termina con Enter
+    uidIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); register(); } });
     const assign = (k) => {
       const sel = h('select', null, children.map((c) => h('option', { value: c.id, selected: k.child_id === c.id }, `${c.full_name} (${c.tutor ? c.tutor.full_name : ''})`)));
       modal('Asignar tarjeta ' + k.uid, field('Alumno', sel), [{ label: 'Cancelar' }, { label: 'Asignar', class: 'primary', onClick: async () => {
@@ -585,20 +591,27 @@
           } catch (e) { toast(e.message, 'err'); return false; }
         } }]);
     };
-    listenCardReader((uid) => { uidIn.value = uid; childSel.focus(); });
+    const unassign = async (k) => {
+      if (!(await confirmBox('Quitar tarjeta', `La tarjeta ${k.uid} se le quitará a ${k.child ? k.child.full_name : 'el alumno'} y regresará al inventario (sin asignar).`))) return;
+      if (await safe(() => call('unassignCard', { card_id: k.id }))) { toast('Tarjeta quitada', 'ok'); render(); }
+    };
+    listenCardReader((uid) => { uidIn.value = uid; register(); });
     put(main, pageHead('Tarjetas', 'Registre tarjetas nuevas, asígnelas a un alumno o repórtelas como perdidas.'),
-      h('div', { class: 'card', style: { marginBottom: '20px' } }, h('h2', null, 'Registrar una tarjeta'),
-        h('div', { class: 'row' }, uidIn, childSel, h('button', { class: 'btn primary', onclick: register }, 'Registrar')),
-        h('p', { class: 'small muted' }, 'Con un lector USB tipo teclado, haga clic en el campo UID y acerque la tarjeta. Se pueden registrar tarjetas sin asignar (inventario) y asignarlas después.')),
-      h('div', { class: 'card tablewrap' }, h('table', null, h('tr', null, h('th', null, 'UID'), h('th', null, 'Estado'), h('th', null, 'Alumno'), h('th', null, 'Tutor'), h('th', { class: 'right' }, 'Saldo'), h('th', null, '')),
-        cards.map((k) => h('tr', null, h('td', null, h('code', null, k.uid)), h('td', null, badge(k.status), k.blocked_by && k.status === 'bloqueada' ? h('div', { class: 'small muted' }, 'por ' + k.blocked_by) : null),
-          h('td', null, k.child ? k.child.full_name : '—'), h('td', null, k.child ? k.child.tutor_name : '—'), h('td', { class: 'right' }, money(k.balance_cents)),
-          h('td', { class: 'right' },
-            k.status !== 'perdida' ? h('button', { class: 'btn sm', onclick: () => assign(k) }, 'Asignar') : null, ' ',
+      h('div', { class: 'card form', style: { marginBottom: '20px' } }, h('h2', null, 'Registrar o asignar una tarjeta'),
+        h('div', { class: 'grid g2' }, field('1. Alumno (opcional: vacío = inventario)', childSel), field('2. Tarjeta (UID)', uidIn)),
+        h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: register }, 'Registrar / asignar'), h('span', { class: 'small muted grow' }, 'Pase la tarjeta por el lector USB (125 kHz o NFC) con el cursor en el campo UID, o escriba el número y presione Enter. No se permiten tarjetas repetidas.')),
+        regMsg),
+      h('div', { class: 'card tablewrap' }, respTable([{ label: 'UID' }, { label: 'Estado' }, { label: 'Alumno' }, { label: 'Tutor' }, { label: 'Saldo', right: true }, { label: '', right: true }],
+        cards.map((k) => [h('code', null, k.uid), h('span', null, badge(k.status), k.blocked_by && k.status === 'bloqueada' ? h('div', { class: 'small muted' }, 'por ' + k.blocked_by) : null),
+          k.child ? k.child.full_name : '—', k.child ? k.child.tutor_name : '—', money(k.balance_cents),
+          h('div', { class: 'row acts-wrap', style: { justifyContent: 'flex-end', gap: '6px' } },
+            k.status !== 'perdida' ? h('button', { class: 'btn sm', onclick: () => assign(k) }, 'Asignar') : null,
+            k.child && ['activa', 'bloqueada'].includes(k.status) ? h('button', { class: 'btn sm', onclick: () => unassign(k) }, 'Quitar') : null,
             k.status === 'activa' ? h('button', { class: 'btn sm', onclick: async () => { await safe(() => call('setCardStatus', { card_id: k.id, status: 'bloqueada' })); render(); } }, 'Bloquear') : null,
             k.status === 'bloqueada' ? h('button', { class: 'btn sm', onclick: async () => { await safe(() => call('setCardStatus', { card_id: k.id, status: 'activa' })); render(); } }, 'Activar') : null, ' ',
             k.status !== 'perdida' ? h('button', { class: 'btn sm', onclick: () => adjust(k) }, 'Ajuste') : null, ' ',
-            k.status !== 'perdida' ? h('button', { class: 'btn sm danger', onclick: () => lost(k) }, 'Perdida') : null))))));
+            k.status !== 'perdida' ? h('button', { class: 'btn sm danger', onclick: () => lost(k) }, 'Perdida') : null)]), null, 'resp-md')));
+    setTimeout(() => uidIn.focus(), 50);
   };
 
   // ----- Tutores y alumnos (admin) -----
@@ -632,9 +645,9 @@
         h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Alumnos'), h('button', { class: 'btn primary sm', onclick: () => editChild(null) }, '+ Alumno')),
           h('table', null, h('tr', null, h('th', null, 'Alumno'), h('th', null, 'Tarjeta'), h('th', { class: 'right' }, 'Saldo'), h('th', null, '')),
             children.map((c) => h('tr', null, h('td', null, h('div', { class: 'row' }, avatar(c.photo, 34), h('div', null, c.full_name, c.active ? '' : ' (inactivo)', h('div', { class: 'small muted' }, `${c.grade || ''} · ${c.tutor ? c.tutor.full_name : ''}`)))),
-              h('td', null, c.card ? [h('code', null, c.card.uid), ' ', badge(c.card.status)] : h('span', { class: 'muted' }, 'sin tarjeta')),
+              h('td', null, c.card ? [h('code', null, c.card.uid), ' ', badge(c.card.status)] : h('button', { class: 'btn sm ok', onclick: () => go('hijo', { id: c.id, tab: 'tarjeta' }) }, '🪪 Asignar tarjeta')),
               h('td', { class: 'right' }, money(c.balance_cents)),
-              h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => editChild(c) }, 'Editar'), ' ', h('button', { class: 'btn sm primary', onclick: () => go('hijo', { id: c.id }) }, 'Límites'),
+              h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => editChild(c) }, 'Editar'), ' ', h('button', { class: 'btn sm primary', onclick: () => go('hijo', { id: c.id }) }, 'Ver'), ' ', h('button', { class: 'btn sm', onclick: () => go('hijo', { id: c.id, tab: 'tarjeta' }) }, 'Tarjeta'),
                 WEB ? [' ', h('button', { class: 'btn sm', onclick: () => invite(c) }, 'Invitación')] : null)))))));
   };
   // Código de invitación para que el padre cree su cuenta y quede vinculado (solo servidor)
@@ -753,7 +766,9 @@
   // ----- Detalle de un alumno (tutor y admin) -----
   VIEWS.hijo = async (main, params) => {
     const [s, products, categories] = await Promise.all([call('childSummary', { child_id: params.id }), call('listProducts', { child_id: params.id }), call('listCategories', { child_id: params.id })]);
-    const c = s.child; const tab = params.tab || 'historial';
+    const c = s.child; const isTutor = state.user.role === 'tutor';
+    // Límites y prohibidos: solo el padre/madre/tutor los configura; la escuela solo los consulta
+    let tab = params.tab || 'historial'; if (!isTutor && (tab === 'limites' || tab === 'prohibidos')) tab = 'reglas';
     const back = state.user.role === 'tutor' ? 'hijos' : 'alumnos';
     const header = h('div', { class: 'card row', style: { marginBottom: '16px' } }, avatar(c.photo, 80),
       h('div', { class: 'grow' }, h('h1', { style: { margin: 0 } }, c.full_name), h('div', { class: 'muted' }, state.user.role === 'tutor' && c.school_name ? `🏫 ${c.school_name} · ` : '', c.grade || '', ' · Tutor: ', c.tutor ? c.tutor.full_name : ''),
@@ -765,12 +780,20 @@
         h('div', null, h('div', { class: 'small muted' }, 'Esta semana'), h('div', { style: { fontSize: '1.3rem', fontWeight: 700 } }, money(s.spent_week_cents))),
         h('div', null, h('div', { class: 'small muted' }, 'Este mes'), h('div', { style: { fontSize: '1.3rem', fontWeight: 700 } }, money(s.spent_month_cents)))));
     const tabs = h('div', { class: 'tabs' }, h('button', { class: 'btn', onclick: () => go(back) }, '← Volver'),
-      [['historial', 'Historial'], ['limites', 'Límites de gasto'], ['prohibidos', 'Productos prohibidos'], ['tarjeta', 'Tarjeta y perfil']].map(([k, l]) => h('button', { class: 'btn' + (k === tab ? ' active' : ''), onclick: () => go('hijo', { id: c.id, tab: k }) }, l)));
+      (isTutor ? [['historial', 'Historial'], ['limites', 'Límites de gasto'], ['prohibidos', 'Productos prohibidos'], ['tarjeta', 'Tarjeta y perfil']]
+        : [['historial', 'Historial'], ['reglas', 'Límites y prohibidos (del tutor)'], ['tarjeta', 'Tarjeta y perfil']]).map(([k, l]) => h('button', { class: 'btn' + (k === tab ? ' active' : ''), onclick: () => go('hijo', { id: c.id, tab: k }) }, l)));
     const body = h('div', { class: 'card' });
     put(main, header, tabs, body);
 
     if (tab === 'historial') {
       put(body, h('h2', null, 'Últimos movimientos'), h('p', { class: 'small muted' }, 'Incluye intentos de compra rechazados (por saldo, límites o productos prohibidos).'), movTable(s.movements, { showUser: false, showChild: false }));
+    } else if (tab === 'reglas') {
+      const pr = s.prohibitions || { products: [], categories: [] };
+      const list = (xs) => (xs.length ? h('ul', null, xs.map((x) => h('li', null, x.name))) : h('p', { class: 'muted' }, 'Ninguno'));
+      put(body, h('div', { class: 'result small', style: { marginBottom: '12px' } }, '🔒 Solo el padre, madre o tutor puede configurar los límites de gasto y los productos prohibidos desde su app. Aquí solo se consultan.'),
+        h('h2', null, 'Límites de gasto'), h('p', null, limitsText(s.limits)),
+        h('h2', { style: { marginTop: '16px' } }, 'Categorías prohibidas'), list(pr.categories),
+        h('h2', { style: { marginTop: '16px' } }, 'Productos prohibidos'), list(pr.products));
     } else if (tab === 'limites') {
       const l = s.limits;
       const pt = h('input', { value: centsToInput(l.per_transaction_cents), placeholder: 'Sin límite' });
@@ -804,13 +827,62 @@
       const name = h('input', { value: c.full_name }); const grade = h('input', { value: c.grade || '' });
       let photo = c.photo; const prev = h('div'); const setPrev = () => { prev.innerHTML = ''; prev.appendChild(avatar(photo, 80)); }; setPrev();
       const file = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', onchange: async () => { if (file.files[0]) { photo = await resizeImage(file.files[0]); setPrev(); } } });
+      const isAdmin = state.user.role === 'admin';
+      const reload = () => go('hijo', { id: c.id, tab: 'tarjeta' });
+      // Campo de UID: se escribe a mano o se pasa la tarjeta por un lector USB tipo teclado (termina con Enter)
+      const uidField = (placeholder, onSubmit) => {
+        const inp = h('input', { placeholder, autocomplete: 'off', 'data-uid-input': '', style: { fontSize: '1.15rem' } });
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); onSubmit(inp.value); } });
+        return inp;
+      };
+      let cardBox;
+      if (isAdmin) {
+        const msg = h('div', { role: 'status' });
+        const fail = (e) => { msg.innerHTML = ''; msg.appendChild(h('div', { class: 'result err' }, e.message)); };
+        if (!k) {
+          const doAssign = async (uid) => {
+            if (!String(uid || '').trim()) return;
+            try { const r = await call('assignCardByUid', { uid, child_id: c.id }); toast(`Tarjeta ${r.uid} asignada a ${c.full_name}`, 'ok'); reload(); } catch (e) { fail(e); inp.select(); }
+          };
+          const inp = uidField('Pase la tarjeta o escriba el UID + Enter', doAssign);
+          listenCardReader((uid) => { inp.value = uid; doAssign(uid); });
+          setTimeout(() => inp.focus(), 60);
+          cardBox = h('div', { class: 'form assign-card' }, h('div', { class: 'result small' }, '🪪 Este alumno no tiene tarjeta.'),
+            field('Asignar tarjeta (UID)', inp), h('div', null, h('button', { class: 'btn primary', onclick: () => doAssign(inp.value) }, 'Asignar tarjeta')),
+            h('p', { class: 'small muted' }, 'Con el cursor en el campo, pase la tarjeta por el lector USB (125 kHz o NFC): el número se escribe solo y se asigna al presionar Enter. También puede escribirlo a mano. Si la tarjeta es nueva se registra; si ya está asignada a otro alumno, se avisa.'), msg);
+        } else {
+          const replace = () => {
+            const m = h('div', { role: 'status' });
+            let close = null;
+            const submit = async (uid) => {
+              if (!String(uid || '').trim()) return;
+              try { const r = await call('reportLostAndReplace', { card_id: k.id, new_uid: uid }); toast(`Tarjeta reemplazada. Saldo transferido: ${money(r.transferred_cents)}`, 'ok'); if (close) close(); reload(); } catch (e) { m.innerHTML = ''; m.appendChild(h('div', { class: 'result err' }, e.message)); }
+            };
+            const nu = uidField('Pase la tarjeta NUEVA por el lector o escriba su UID', submit);
+            close = modal('Reemplazar tarjeta', h('div', { class: 'form' }, h('p', null, `La tarjeta ${k.uid} quedará como perdida (inutilizable) y su saldo de ${money(k.balance_cents)} pasará a la tarjeta nueva.`), field('Tarjeta nueva (UID)', nu), m),
+              [{ label: 'Cancelar' }, { label: 'Reemplazar', class: 'primary', onClick: async () => { await submit(nu.value); return false; } }]);
+            setTimeout(() => nu.focus(), 60);
+          };
+          const unassign = async () => {
+            if (!(await confirmBox('Quitar tarjeta', `La tarjeta ${k.uid} se le quitará a ${c.full_name} y regresará al inventario.`))) return;
+            try { await call('unassignCard', { card_id: k.id }); toast('Tarjeta quitada', 'ok'); reload(); } catch (e) { fail(e); }
+          };
+          cardBox = h('div', { class: 'form' }, h('div', null, 'UID: ', h('code', null, k.uid), ' ', badge(k.status)),
+            h('div', { class: 'row acts-wrap', style: { gap: '8px', flexWrap: 'wrap' } },
+              k.status === 'activa' ? h('button', { class: 'btn warn', onclick: async () => { if (await safe(() => call('setCardStatus', { card_id: k.id, status: 'bloqueada' }))) reload(); } }, '⛔ Bloquear')
+                : h('button', { class: 'btn ok', onclick: async () => { if (await safe(() => call('setCardStatus', { card_id: k.id, status: 'activa' }))) reload(); } }, 'Desbloquear'),
+              h('button', { class: 'btn', onclick: replace }, '🔁 Reemplazar tarjeta'),
+              h('button', { class: 'btn danger', onclick: unassign }, 'Quitar tarjeta')),
+            h('p', { class: 'small muted' }, 'Reemplazar: para tarjeta perdida o dañada (el saldo pasa a la nueva). Quitar: solo si la tarjeta tiene saldo $0; regresa al inventario.'), msg);
+        }
+      }
       put(body, h('div', { class: 'grid g2' },
         h('div', null, h('h2', null, 'Tarjeta'),
-          k ? h('div', { class: 'form' }, h('div', null, 'UID: ', h('code', null, k.uid), ' ', badge(k.status)),
+          cardBox || (k ? h('div', { class: 'form' }, h('div', null, 'UID: ', h('code', null, k.uid), ' ', badge(k.status)),
             k.status === 'activa' ? h('button', { class: 'btn danger', onclick: async () => { if (await confirmBox('Bloquear tarjeta', 'Mientras esté bloqueada no se podrá comprar con ella. Puede desbloquearla cuando quiera.')) { await safe(() => call('setCardStatus', { card_id: k.id, status: 'bloqueada' })); go('hijo', { id: c.id, tab: 'tarjeta' }); } } }, 'Bloquear temporalmente')
               : h('button', { class: 'btn ok', onclick: async () => { await safe(() => call('setCardStatus', { card_id: k.id, status: 'activa' })); go('hijo', { id: c.id, tab: 'tarjeta' }); } }, 'Desbloquear tarjeta'),
             h('p', { class: 'small muted' }, 'Si la tarjeta se perdió, bloquéela aquí y avise a la cooperativa para transferir el saldo a una tarjeta nueva.'))
-            : h('p', { class: 'muted' }, 'Este alumno no tiene tarjeta vigente. Acuda a la cooperativa.')),
+            : h('p', { class: 'muted' }, 'Este alumno no tiene tarjeta vigente. Acuda a la cooperativa.'))),
         h('div', null, h('h2', null, 'Personalizar'), h('div', { class: 'form' }, field('Nombre del alumno', name), field('Grado y grupo', grade),
           h('div', { class: 'row' }, prev, field('Foto (opcional)', file), h('button', { class: 'btn sm', onclick: () => { photo = null; setPrev(); } }, 'Quitar')),
           h('div', null, h('button', { class: 'btn primary', onclick: async () => { const r = await safe(() => call('updateChild', { id: c.id, full_name: name.value, grade: grade.value, photo })); if (r) { toast('Perfil actualizado', 'ok'); go('hijo', { id: c.id, tab: 'tarjeta' }); } } }, 'Guardar'))))));
@@ -849,8 +921,8 @@
     return fmtDate(s);
   };
   // Tabla que en celular se muestra como tarjetas (cada celda con su etiqueta)
-  function respTable(headers, rows, rowClass) {
-    return h('table', { class: 'resp' }, h('tr', { class: 'head' }, headers.map((x) => h('th', { class: x.right ? 'right' : '' }, x.label))),
+  function respTable(headers, rows, rowClass, extraClass) {
+    return h('table', { class: 'resp' + (extraClass ? ' ' + extraClass : '') }, h('tr', { class: 'head' }, headers.map((x) => h('th', { class: x.right ? 'right' : '' }, x.label))),
       rows.map((cells, r) => h('tr', { class: rowClass ? rowClass(r) || null : null }, cells.map((c, i) => h('td', { 'data-label': headers[i].label, class: headers[i].right ? 'right' : '' }, c)))));
   }
   const tempPassModal = (title, user, pass) => passShownModal(title, user, pass);
@@ -1081,7 +1153,7 @@
     const acts = [{ label: 'Cerrar' }, { label: 'Imprimir', class: 'primary', onClick: () => { printNode(sheet); return false; } }];
     if (!WEB && window.coop.exportPdf) acts.splice(1, 0, { label: 'Guardar PDF…', onClick: async () => { const r = await window.coop.exportPdf({ html: sheet.outerHTML, fileName: `codigos-padres-${new Date().toISOString().slice(0, 10)}.pdf` }); if (r.ok) toast('PDF guardado en ' + r.data, 'ok'); else if (r.error !== 'Cancelado') toast(r.error, 'err'); return false; } });
     const close = modal('Hoja de códigos para padres', h('div', { class: 'sheet-preview' }, sheet), acts);
-    const m = document.querySelector('.modal-bg:last-child .modal'); if (m) m.classList.add('wide');
+    const bgs = document.querySelectorAll('.modal-bg .modal'); if (bgs.length) bgs[bgs.length - 1].classList.add('wide');
     return close;
   }
 
@@ -1157,7 +1229,7 @@
       h('div', { class: 'row', style: { marginTop: '12px' } }, h('div', { class: 'grow' }), h('button', { class: 'btn', onclick: () => go('programar', { tab: 'codigos' }) }, 'Siguiente: hoja de códigos →'))));
     } else {
       const children = (await call('listChildren')).filter((c) => c.active);
-      const st = await window.coop.sync.status();
+      const st = WEB ? { linked: true, school_name: state.user.school_name } : await window.coop.sync.status();
       const incl = h('input', { type: 'checkbox' });
       const grades = [...new Set(children.map((c) => c.grade || ''))].sort();
       const gsel = h('select', null, h('option', { value: '' }, 'Todos los grados'), grades.map((g) => h('option', { value: g }, g || '(sin grado)')));
@@ -1175,7 +1247,10 @@
         const sel = checks.filter((x) => x.el.checked).map((x) => x.c);
         if (!sel.length) return toast('Seleccione al menos un alumno', 'err');
         let codes = []; let url = ''; let school = state.user.school_name || '';
-        if (st.linked) {
+        if (WEB) {
+          const r = await window.coop.auth.invitationSheet({ child_ids: sel.map((c) => c.id), include_linked: incl.checked });
+          if (!r.ok) toast('No se obtuvieron códigos: ' + r.error, 'err'); else { codes = r.data.codes; url = location.origin; school = r.data.school_name || school; }
+        } else if (st.linked) {
           const r = await window.coop.codes({ child_ids: sel.map((c) => c.id), include_linked: incl.checked });
           if (!r.ok) toast('No se obtuvieron códigos: ' + r.error, 'err'); else { codes = r.data.codes; url = r.data.serverUrl; school = r.data.school_name || school; }
         }
@@ -1187,10 +1262,10 @@
           h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => checks.forEach((x) => { x.el.checked = true; }) }, 'Todos'), h('button', { class: 'btn sm', onclick: () => checks.forEach((x) => { x.el.checked = false; }) }, 'Ninguno'),
             h('div', { class: 'grow' }), h('button', { class: 'btn primary', onclick: () => safe(make) }, 'Generar hoja (PDF / imprimir)'))),
         h('div', { class: 'card' }, h('h2', null, '¿Cómo funciona?'),
-          h('ol', { class: 'small', style: { lineHeight: 1.6 } }, h('li', null, 'La caja se sincroniza y pide al servidor un código por alumno (si ya existe uno vigente, se reutiliza).'),
+          h('ol', { class: 'small', style: { lineHeight: 1.6 } }, h('li', null, 'Se pide al servidor un código por alumno (si ya existe uno vigente, se reutiliza).'),
             h('li', null, 'Se arma una hoja con un recuadro por alumno: nombre, grado, tarjeta y su código.'), h('li', null, 'Imprima, recorte y entregue cada recuadro al padre/tutor junto con la tarjeta.'),
             h('li', null, 'El padre entra a la app web, toca "Tengo un código de invitación" y queda vinculado.')),
-          st.linked ? h('div', { class: 'result ok small' }, `Caja vinculada a ${st.school_name || 'el servidor'}: los códigos se generan en el servidor.`)
+          WEB ? h('div', { class: 'result ok small' }, 'Los códigos se generan en el servidor.') : st.linked ? h('div', { class: 'result ok small' }, `Caja vinculada a ${st.school_name || 'el servidor'}: los códigos se generan en el servidor.`)
             : h('div', { class: 'result err small' }, 'Esta caja no está vinculada al servidor: la hoja saldrá sin códigos. Vincúlela en Ajustes → Servidor en la nube.'))));
       draw();
     }
@@ -1216,6 +1291,57 @@
       try { const r = await superCall('setPassword', { user_id: u.id, password: own.value.trim() || undefined }); passShownModal('Contraseña asignada', r.user, r.password); } catch (e) { toast(e.message, 'err'); return false; }
     } }]);
   }
+  // Editar cualquier cuenta (superadministrador): datos, jerarquía, escuela y alumnos del padre/tutor
+  async function editAccountModal(u0, schools, onDone) {
+    let acc;
+    try { acc = await superCall('getAccount', { user_id: u0.id }); } catch (e) { return toast(e.message, 'err'); }
+    const prot = acc.protected;
+    const name = h('input', { value: acc.full_name || '' });
+    const user = h('input', { value: acc.username || '', disabled: prot, autocomplete: 'off' });
+    const email = h('input', { value: acc.email || '', type: 'email' });
+    const phone = h('input', { value: acc.phone || '', type: 'tel', placeholder: '10 dígitos' });
+    const role = h('select', { disabled: prot }, (prot ? [['superadmin', 'Superadministrador']] : [['admin', 'Administrador'], ['cajero', 'Cajero'], ['tutor', 'Padre / tutor']])
+      .map(([k, l]) => h('option', { value: k, selected: k === acc.role }, l)));
+    const school = h('select', { disabled: prot }, h('option', { value: '' }, prot ? 'Toda la plataforma' : '— sin escuela —'), schools.map((s) => h('option', { value: s.id, selected: s.id === acc.school_id }, s.name)));
+    let kids = acc.children.map((c) => ({ ...c }));
+    const kidsBox = h('div'); const kidsWrap = h('div', { class: 'card', style: { padding: '12px', marginTop: '6px' } });
+    const search = h('input', { placeholder: 'Buscar alumno por nombre para vincular', style: { width: '100%' } });
+    const results = h('div', { class: 'checks', style: { maxHeight: '180px' } });
+    const drawKids = () => {
+      kidsBox.innerHTML = '';
+      put(kidsBox, kids.length ? kids.map((c) => h('div', { class: 'row', style: { justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--border)' } },
+        h('span', null, h('b', null, c.full_name), h('span', { class: 'small muted' }, ` · ${c.grade || ''} · ${c.school_name || ''}`)),
+        h('button', { class: 'btn sm danger', type: 'button', onclick: () => { kids = kids.filter((x) => x.id !== c.id); drawKids(); } }, 'Quitar')))
+        : h('div', { class: 'muted small' }, 'Sin alumnos vinculados'));
+    };
+    let st;
+    const doSearch = async () => {
+      results.innerHTML = '';
+      const q = search.value.trim(); if (q.length < 2) return;
+      const list = await superCall('searchChildren', { q }).catch(() => []); // todas las escuelas (un padre puede tener hijos en varias)
+      put(results, list.filter((c) => !kids.some((k) => k.id === c.id)).slice(0, 40).map((c) => h('div', { class: 'row', style: { justifyContent: 'space-between', padding: '3px 0' } },
+        h('span', null, c.full_name, h('span', { class: 'small muted' }, ` · ${c.grade || ''} · ${c.school_name || ''}${c.tutor_name ? ' · tutor actual: ' + c.tutor_name : ''}`)),
+        h('button', { class: 'btn sm', type: 'button', onclick: () => { kids.push(c); drawKids(); doSearch(); } }, 'Vincular'))));
+      if (!results.children.length) results.appendChild(h('div', { class: 'muted small' }, 'Sin resultados'));
+    };
+    search.addEventListener('input', () => { clearTimeout(st); st = setTimeout(doSearch, 250); });
+    put(kidsWrap, h('b', null, 'Alumnos vinculados (hijos)'), kidsBox, h('div', { style: { marginTop: '8px' } }, search), results);
+    const syncRole = () => { kidsWrap.style.display = role.value === 'tutor' ? '' : 'none'; };
+    role.addEventListener('change', syncRole);
+    drawKids(); syncRole();
+    modal('Editar cuenta', h('div', { class: 'form' },
+      prot ? banner('info', '🛡️', 'Cuenta protegida del superadministrador: solo se pueden cambiar nombre, correo y teléfono.') : null,
+      field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Usuario (para entrar)', user), field('Jerarquía', role)),
+      h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone)), field('Escuela', school), prot ? null : kidsWrap,
+      h('p', { class: 'small muted' }, 'Si cambia el usuario, la jerarquía o la escuela, la persona deberá volver a entrar. Todo cambio queda en la bitácora.')),
+    [{ label: 'Cancelar' }, { label: 'Guardar cambios', class: 'primary', onClick: async () => {
+      const data = { user_id: acc.id, full_name: name.value, email: email.value.trim() || null, phone: phone.value.trim() || null };
+      if (!prot) Object.assign(data, { username: user.value.trim(), role: role.value, school_id: school.value ? Number(school.value) : null, child_ids: role.value === 'tutor' ? kids.map((k) => k.id) : [] });
+      try { await superCall('updateAccount', data); toast('Cuenta actualizada', 'ok'); if (onDone) onDone(); } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+    const bgs = document.querySelectorAll('.modal-bg .modal'); if (bgs.length) bgs[bgs.length - 1].classList.add('wide');
+  }
+
   VIEWS.cuentas = async (main) => {
     const o = await superCall('overview');
     const q = h('input', { placeholder: 'Nombre, usuario, correo o teléfono' });
@@ -1237,7 +1363,8 @@
           accountState(u),
           h('span', { title: u.last_login_ip || '' }, since(u.last_login_at)),
           fmtDate(u.created_at),
-          h('div', { class: 'row', style: { justifyContent: 'flex-end', gap: '6px' } },
+          h('div', { class: 'row acts-wrap', style: { justifyContent: 'flex-end', gap: '6px' } },
+            h('button', { class: 'btn sm primary', onclick: () => editAccountModal(u, o.schools, load) }, '✏️ Editar'),
             u.role === 'superadmin' ? h('span', { class: 'small muted' }, 'Protegida') : [
               h('button', { class: 'btn sm', onclick: () => setPasswordModal(u) }, '🔑 Contraseña'),
               u.locked ? h('button', { class: 'btn sm', onclick: async () => { if (await safe(() => superCall('unlockAccount', { user_id: u.id }))) { toast('Cuenta desbloqueada', 'ok'); load(); } } }, 'Desbloquear') : null,
@@ -1246,7 +1373,7 @@
                 if (await safe(() => superCall('setAccountActive', { user_id: u.id, active: !u.active }))) { toast(u.active ? 'Cuenta desactivada' : 'Cuenta activada', 'ok'); load(); }
               } }, u.active ? 'Desactivar' : 'Activar'),
             ]),
-        ])));
+        ]), null, 'resp-md'));
     };
     let t; q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 300); });
     [role, school, status].forEach((x) => x.addEventListener('change', load));
@@ -1533,6 +1660,17 @@
       h('div', { class: 'small muted' }, `Última sincronización: ${fullDate(st.last_sync_at)} · Cambios pendientes de enviar: ${st.pending} · Equipo: ${st.device_id.slice(0, 8)}… ${st.linked ? '(vinculado)' : '(sin vincular)'}`),
       st.last_error ? h('div', { class: 'small', style: { color: st.state === 'solo_lectura' ? 'var(--warn)' : 'var(--err)' } }, st.last_error) : null,
       st.last_stats ? h('div', { class: 'small muted' }, `Último ciclo: ${st.last_stats.pulled || 0} ajustes descargados, ${st.last_stats.transactions || 0} movimientos enviados${st.last_stats.conflicts_server_wins ? `, ${st.last_stats.conflicts_server_wins} ajustes donde ganó el servidor` : ''}.`) : null].filter(Boolean));
+  }
+
+  // ---------- conexión (solo en línea) ----------
+  // Sin internet el adaptador muestra el aviso a pantalla completa y rechaza toda operación.
+  // Al volver la conexión: se recupera la sesión y se vuelven a cargar los datos (nunca se muestran datos viejos).
+  if (window.coop.connection) {
+    window.coop.connection.onChange(async (on) => {
+      if (!on) { document.querySelectorAll('.modal-bg').forEach((m) => m.remove()); return; }
+      if (!state.user) { const r = await window.coop.call('me'); if (r.ok && r.data) { state.user = r.data; render(); } return; }
+      render();
+    });
   }
 
   // ---------- inicio ----------
