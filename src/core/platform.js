@@ -13,7 +13,7 @@ function tempPassword() {
   return s;
 }
 
-function createPlatform(db, { svc, sync, auth, now = () => new Date() } = {}) {
+function createPlatform(db, { svc, sync, auth, security = null, now = () => new Date() } = {}) {
   const ts = () => fmtLocal(now());
   const need = (actor) => { if (!actor || actor.role !== 'superadmin') throw new AppError('Solo el superadministrador puede hacer esto', 'PROHIBIDO'); };
   const getSchool = (id) => {
@@ -75,7 +75,7 @@ function createPlatform(db, { svc, sync, auth, now = () => new Date() } = {}) {
     if (!['admin', 'cajero'].includes(role)) throw new AppError('Rol inválido (admin o cajero)', 'VALIDACION');
     const password = tempPassword();
     const system = { id: 0, role: 'admin', school_id: sid };
-    const u = svc.createUser(system, { role, username: data.username, full_name: data.full_name, email: data.email || null, phone: data.phone || null, password, must_change_password: true });
+    const u = svc.createUser(system, { role, username: data.username, full_name: data.full_name, email: data.email || null, phone: data.phone || null, password });
     return { user: u, temporary_password: password };
   }
 
@@ -128,7 +128,7 @@ function createPlatform(db, { svc, sync, auth, now = () => new Date() } = {}) {
     const password = tempPassword();
     const bcrypt = require('bcryptjs');
     db.transaction(() => {
-      db.run('UPDATE users SET password_hash = ?, must_change_password = 1, token_version = token_version + 1, active = 1 WHERE id = ?', [bcrypt.hashSync(password, 10), u.id]);
+      db.run('UPDATE users SET password_hash = ?, must_change_password = 0, token_version = token_version + 1, active = 1 WHERE id = ?', [bcrypt.hashSync(password, 10), u.id]);
       db.run('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [u.id]);
     });
     return { user: svc.publicUser(db.get('SELECT * FROM users WHERE id = ?', [u.id])), temporary_password: password };
@@ -173,13 +173,26 @@ function createPlatform(db, { svc, sync, auth, now = () => new Date() } = {}) {
     listChildren: (u, a) => listSchoolChildren(u, a.school_id),
     generateInvitations: (u, a) => generateInvitations(u, a.school_id, a),
   };
-  function handle(user, method, args) {
+  // Acciones del panel que quedan en la bitácora
+  const AUDITED = { createSchool: 'escuela_creada', updateSchool: 'escuela_editada', createStaff: 'usuario_creado', resetStaffPassword: 'contrasena_asignada', setStaffActive: 'cuenta_activada', revokeDevice: 'caja_revocada', setPrimaryDevice: 'caja_principal', generateInvitations: 'codigos_generados' };
+  const SEC = security ? security.methods : {};
+  function handle(user, method, args, ctx = {}) {
     need(user);
+    const a = args && typeof args === 'object' ? args : {};
+    if (Object.prototype.hasOwnProperty.call(SEC, method)) return SEC[method](user, a, ctx);
     const fn = Object.prototype.hasOwnProperty.call(M, method) ? M[method] : null;
     if (!fn) throw new AppError('Operación desconocida', 'NO_ENCONTRADO');
-    return fn(user, args && typeof args === 'object' ? args : {});
+    const out = fn(user, a);
+    if (security && AUDITED[method]) {
+      let action = AUDITED[method];
+      if (method === 'setStaffActive' && !a.active) action = 'cuenta_desactivada';
+      const sid = a.school_id || (method.endsWith('School') ? a.id : null) || (out && out.school && out.school.id) || (out && out.user && out.user.school_id) || null;
+      const det = { ...a }; if (Array.isArray(det.child_ids)) det.child_ids = det.child_ids.length;
+      security.audit(user, action, { school_id: sid, ip: ctx.ip, target_type: a.user_id ? 'user' : (a.device_id ? 'device' : 'school'), target_id: a.user_id || a.device_id || sid, details: det, severity: ['resetStaffPassword', 'setStaffActive', 'revokeDevice'].includes(method) || (method === 'updateSchool' && a.status === 'suspendida') ? 'aviso' : 'info' });
+    }
+    return out;
   }
-  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: Object.keys(M) };
+  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: [...Object.keys(M), ...Object.keys(SEC)] };
 }
 
 module.exports = { createPlatform, tempPassword };

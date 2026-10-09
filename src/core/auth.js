@@ -77,15 +77,40 @@ function createAuth(db, svc, opts = {}) {
     return { access_token, refresh_token, token_type: 'Bearer', expires_in: accessTtlSec, user: svc.publicUser(u), must_change_password: !!u.must_change_password };
   }
 
+  const security = opts.security || null;
+  const lockedOut = () => new AppError('El sistema está en ALERTA ROJA: el acceso está bloqueado temporalmente. Comuníquese con el administrador de la plataforma.', 'SISTEMA_BLOQUEADO');
+  // Bloqueo persistente tras varios intentos fallidos (más estricto para el superadministrador)
+  const MAX_FAILS = { superadmin: opts.maxSuperadminFails || 5, other: opts.maxAccountFails || 10 };
+  const LOCK_MS = opts.lockMs || 15 * 60 * 1000;
+
   function login(identifier, password, { ip = 'local', userAgent } = {}) {
     const idKey = 'id:' + String(identifier || '').trim().toLowerCase();
     loginLimiter.check(idKey); ipLimiter.check('ip:' + ip);
+    const target = svc.findUserByIdentifier(identifier);
+    if (target && target.locked_until && target.locked_until > nowMs()) {
+      if (security) security.audit({ id: target.id, full_name: target.full_name, role: target.role, school_id: target.school_id }, 'login_rechazado_bloqueo', { ip, severity: 'aviso' });
+      throw new AppError(`Cuenta bloqueada por intentos fallidos. Intenta de nuevo en ${Math.ceil((target.locked_until - nowMs()) / 60000)} min.`, 'LIMITE_INTENTOS');
+    }
     let user;
     try { user = svc.login(identifier, password); } catch (e) {
       loginLimiter.hit(idKey); ipLimiter.hit('ip:' + ip);
+      if (target && e.code === 'NO_AUTENTICADO') {
+        const fails = (target.failed_logins || 0) + 1;
+        const max = target.role === 'superadmin' ? MAX_FAILS.superadmin : MAX_FAILS.other;
+        const lock = fails >= max ? nowMs() + LOCK_MS : null;
+        db.run('UPDATE users SET failed_logins = ?, locked_until = ? WHERE id = ?', [lock ? 0 : fails, lock, target.id]);
+        if (security && lock) {
+          security.audit({ id: target.id, full_name: target.full_name, role: target.role, school_id: target.school_id }, 'cuenta_bloqueada_intentos', { ip, severity: 'alta', details: { cuenta: target.username, minutos: LOCK_MS / 60000 } });
+          security.alert({ kind: 'cuenta_bloqueada', severity: target.role === 'superadmin' ? 'critica' : 'alta', school_id: target.school_id, message: `La cuenta "${target.username}" (${target.role}) se bloqueó ${LOCK_MS / 60000} min por ${max} intentos fallidos (IP ${ip}).`, dedupe: 'lock:' + target.id + ':' + Math.floor(nowMs() / LOCK_MS) });
+        }
+      }
+      if (security) security.onLoginFailure(identifier, ip, target);
       throw e;
     }
+    if (security && security.isLockdown() && user.role !== 'superadmin') throw lockedOut();
     loginLimiter.reset(idKey);
+    db.run('UPDATE users SET failed_logins = 0, locked_until = NULL, last_login_at = ?, last_login_ip = ? WHERE id = ?', [ts(), String(ip || '').slice(0, 64), user.id]);
+    if (security) security.audit(user, 'login', { ip });
     return issueTokens(getUser(user.id), { userAgent });
   }
 
@@ -97,6 +122,7 @@ function createAuth(db, svc, opts = {}) {
     }
     const u = getUser(p.sub);
     if (!u || !u.active || u.token_version !== p.tv) throw new AppError('Sesión inválida o cerrada', 'NO_AUTENTICADO');
+    if (security && u.role !== 'superadmin' && security.isLockdown()) throw new AppError('Sesión cerrada: el sistema está en ALERTA ROJA', 'NO_AUTENTICADO');
     svc.assertSchoolActive(u);
     return svc.publicUser(u);
   }
@@ -113,6 +139,7 @@ function createAuth(db, svc, opts = {}) {
     if (row.expires_at < nowMs()) throw new AppError('La sesión expiró. Inicia sesión de nuevo.', 'NO_AUTENTICADO');
     const u = getUser(row.user_id);
     if (!u || !u.active) throw new AppError('Usuario inactivo', 'NO_AUTENTICADO');
+    if (security && u.role !== 'superadmin' && security.isLockdown()) throw new AppError('Sesión cerrada: el sistema está en ALERTA ROJA', 'NO_AUTENTICADO');
     svc.assertSchoolActive(u);
     return db.transaction(() => {
       db.run('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?', [row.id]);
@@ -139,7 +166,11 @@ function createAuth(db, svc, opts = {}) {
   }
 
   // ----- recuperación de contraseña -----
+  // Política: solo el superadministrador cambia contraseñas. La recuperación por correo queda desactivada
+  // (se puede reactivar con allowSelfReset para instalaciones de una sola escuela).
+  const NO_SELF = () => new AppError('Para recuperar tu contraseña comunícate con la administración de tu escuela; el administrador de la plataforma te asignará una nueva.', 'PROHIBIDO');
   async function requestPasswordReset(identifier, { ip = 'local' } = {}) {
+    if (!opts.allowSelfReset) throw NO_SELF();
     forgotLimiter.check('f:' + ip + ':' + String(identifier || '').toLowerCase());
     forgotLimiter.hit('f:' + ip + ':' + String(identifier || '').toLowerCase());
     const u = svc.findUserByIdentifier(identifier);
@@ -157,6 +188,7 @@ function createAuth(db, svc, opts = {}) {
     return generic;
   }
   function resetPassword(token, newPassword) {
+    if (!opts.allowSelfReset) throw NO_SELF();
     const row = db.get('SELECT * FROM password_resets WHERE token_hash = ?', [sha256(token || '')]);
     if (!row || row.used || row.expires_at < nowMs()) throw new AppError('El enlace no es válido o ya expiró', 'VALIDACION');
     const p = str(newPassword, 'nueva contraseña', { min: 6, max: 100 });
@@ -173,12 +205,12 @@ function createAuth(db, svc, opts = {}) {
     if (!actor || actor.role !== 'admin') throw new AppError('No tienes permiso para esta acción', 'PROHIBIDO');
     if (!data.email && !data.phone) throw new AppError('Indica correo o teléfono del tutor', 'VALIDACION');
     const password = tempPassword();
-    const u = svc.createUser(actor, { role: 'tutor', full_name: data.full_name, email: data.email || null, phone: data.phone || null, password, must_change_password: true });
+    const u = svc.createUser(actor, { role: 'tutor', full_name: data.full_name, email: data.email || null, phone: data.phone || null, password });
     if (Array.isArray(data.child_ids)) {
       for (const cid of data.child_ids) { svc.updateChild(actor, cid, { tutor_id: u.id }); onChildLinked(Number(cid)); }
     }
     await mailer.send({ to: u.email || u.phone, channel: u.email ? 'email' : 'sms', subject: 'Tu cuenta de la Cooperativa NFC',
-      text: `Hola ${u.full_name}. Tu usuario es ${u.username} y tu contraseña temporal es ${password}. Al entrar en ${appUrl} se te pedirá cambiarla.` });
+      text: `Hola ${u.full_name}. Tu usuario es ${u.username} y tu contraseña temporal es ${password}. Entra en ${appUrl}. Guárdala en un lugar seguro; si la olvidas, pide una nueva a la escuela.` });
     return { user: u, temporary_password: password };
   }
 

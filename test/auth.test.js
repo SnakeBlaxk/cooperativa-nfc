@@ -68,7 +68,7 @@ test('expiración de sesión: access token vence y refresh vencido se rechaza', 
   assert.throws(() => auth.refresh(s2.refresh_token), /expiró/);
 });
 
-test('admin crea tutor con contraseña temporal; cambio obligatorio en el primer login', async () => {
+test('admin crea tutor con contraseña generada; nadie salvo el superadmin puede cambiar contraseñas', async () => {
   const admin = (await login('admin', 'admin123')).data.access_token;
   const kids = (await api('/api/rpc/listChildren', { body: {}, token: admin })).data;
   const vale = kids.find((k) => k.full_name.startsWith('Valentina'));
@@ -77,18 +77,22 @@ test('admin crea tutor con contraseña temporal; cambio obligatorio en el primer
   const temp = r.data.temporary_password;
   assert.ok(mailer.outbox.at(-1).text.includes(temp));
   const l = await login('laura@example.com', temp);
-  assert.equal(l.data.must_change_password, true);
-  const blocked = await api('/api/rpc/listChildren', { body: {}, token: l.data.access_token });
-  assert.equal(blocked.status, 403); assert.equal(blocked.code, 'DEBE_CAMBIAR_PASSWORD');
-  const ch = await api('/api/auth/change-password', { body: { current: temp, next: 'NuevaClave2026' }, token: l.data.access_token });
-  assert.equal(ch.status, 200); assert.equal(ch.data.must_change_password, false);
-  // el token anterior queda invalidado; el nuevo funciona
-  assert.equal((await api('/api/auth/me', { token: l.data.access_token })).status, 401);
-  const ok = await api('/api/rpc/listChildren', { body: {}, token: ch.data.access_token });
+  assert.equal(l.data.must_change_password, false); // ya no se obliga (no podría cambiarla)
+  const ok = await api('/api/rpc/listChildren', { body: {}, token: l.data.access_token });
   assert.equal(ok.status, 200); assert.equal(ok.data.length, 0);
+  // tutor, cajero y admin NO pueden cambiar contraseñas (ni la suya ni la de otros)
+  for (const [u, p] of [['laura@example.com', temp], ['cajero', 'cajero123'], ['admin', 'admin123']]) {
+    const t = (await login(u, p)).data.access_token;
+    const ch = await api('/api/auth/change-password', { body: { current: p, next: 'NuevaClave2026xx' }, token: t });
+    assert.equal(ch.status, 403, u); assert.equal(ch.code, 'PROHIBIDO');
+    assert.equal((await api('/api/rpc/changePassword', { body: { current: p, next: 'NuevaClave2026xx' }, token: t })).status, 403);
+  }
+  const lauraId = (await api('/api/rpc/listUsers', { body: { role: 'tutor' }, token: admin })).data.find((u) => u.email === 'laura@example.com').id;
+  const up = await api('/api/rpc/updateUser', { body: { id: lauraId, password: 'OtraClave2026' }, token: admin });
+  assert.equal(up.status, 403);
+  assert.equal((await login('laura@example.com', temp)).status, 200); // sigue igual
   // no puede ver al alumno de otro tutor
-  assert.equal((await api('/api/rpc/childSummary', { body: { child_id: vale.id }, token: ch.data.access_token })).status, 403);
-  assert.equal((await login('laura@example.com', temp)).status, 401);
+  assert.equal((await api('/api/rpc/childSummary', { body: { child_id: vale.id }, token: l.data.access_token })).status, 403);
 });
 
 test('invitación por alumno: autoregistro del padre, código de un solo uso y vinculación de otro hijo', async () => {
@@ -117,21 +121,11 @@ test('invitación por alumno: autoregistro del padre, código de un solo uso y v
   assert.ok(list.some((i) => i.code === inv1.code && i.status === 'usado'));
 });
 
-test('recuperación de contraseña con token de un solo uso', async () => {
+test('recuperación por correo desactivada: solo el superadmin asigna contraseñas', async () => {
   const before = mailer.outbox.length;
-  const unknown = await api('/api/auth/forgot', { body: { identifier: 'nadie@example.com' } });
-  assert.equal(unknown.status, 200); assert.equal(mailer.outbox.length, before); // misma respuesta, sin envío
   const r = await api('/api/auth/forgot', { body: { identifier: 'juan@example.com' } });
-  assert.equal(r.data.message, unknown.data.message);
-  const msg = mailer.outbox.at(-1);
-  assert.equal(msg.to, 'juan@example.com');
-  assert.ok(msg.text.includes('http://test/?reset='));
-  const session = (await login('maria', 'tutor123')).data; // otra cuenta, no se afecta
-  const rs = await api('/api/auth/reset', { body: { token: msg.token, password: 'OtraClave99' } });
-  assert.equal(rs.status, 200);
-  assert.equal((await api('/api/auth/reset', { body: { token: msg.token, password: 'OtraMas99' } })).status, 400);
-  assert.equal((await api('/api/auth/reset', { body: { token: 'inventado', password: 'OtraMas99' } })).status, 400);
-  assert.equal((await api('/api/auth/me', { token: session.access_token })).status, 200);
+  assert.equal(r.status, 403); assert.equal(mailer.outbox.length, before);
+  assert.equal((await api('/api/auth/reset', { body: { token: 'inventado', password: 'OtraMas99' } })).status, 403);
 });
 
 test('roles en cada endpoint', async () => {

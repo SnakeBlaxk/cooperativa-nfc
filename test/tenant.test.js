@@ -144,7 +144,7 @@ test('superadmin: ve todas las escuelas y totales; solo él entra al panel', asy
   const c = await sup('createSchool', { name: 'Escuela Nueva', status: 'prueba', plan_note: '$900/mes', admin_username: 'admin.nueva', admin_full_name: 'Directora Nueva' }, ZUKI);
   assert.ok(c.ok, c.error); assert.ok(c.data.admin.temporary_password.length >= 10);
   const l = await api('/api/auth/login', { body: { identifier: 'admin.nueva', password: c.data.admin.temporary_password } });
-  assert.equal(l.data.must_change_password, true);
+  assert.equal(l.data.must_change_password, false); // solo el superadmin cambia contraseñas: no se obliga
   const N = await tok('admin.nueva', c.data.admin.temporary_password);
   assert.deepEqual((await rpc('listChildren', {}, N)).data, []);
   assert.equal((await rpc('listCategories', {}, N)).data.length, 5);
@@ -185,7 +185,7 @@ test('sincronización por escuela: cada caja solo envía/recibe su escuela y los
   const sa = (await sup('createSchool', { name: 'Escuela A', status: 'activa', admin_username: 'adminA' }, Z)).data;
   const sb = (await sup('createSchool', { name: 'Escuela B', status: 'activa', admin_username: 'adminB' }, Z)).data;
   await tok('adminA', sa.admin.temporary_password); await tok('adminB', sb.admin.temporary_password);
-  const pwA = sa.admin.temporary_password + 'X9'; const pwB = sb.admin.temporary_password + 'X9';
+  const pwA = sa.admin.temporary_password; const pwB = sb.admin.temporary_password;
   // Caja A: datos demo. Caja B: base limpia con una tarjeta repetida (UID de A) y otra propia
   const deskA = await openDatabase(null, { syncOutbox: true }); seed(deskA);
   const deskB = await openDatabase(null, { syncOutbox: true }); seedMinimal(deskB);

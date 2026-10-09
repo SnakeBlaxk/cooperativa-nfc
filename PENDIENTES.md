@@ -3,8 +3,10 @@
 Lista priorizada de lo que falta o conviene pulir después de la versión 1.0.
 
 ## Alta prioridad
+0. **Guardar los datos de forma permanente en el servidor**: hoy Render gratis usa `/tmp` (se borra al reiniciar). Configurar Turso (gratis) o Render Starter + disco (≈ 7.25 USD/mes). Pasos en README §8.
+0b. Seguridad v2 — siguientes pasos: papelera también para alumnos/tarjetas/usuarios (hoy solo productos usan borrado suave; alumnos y usuarios se desactivan), verificación en dos pasos (2FA) para el superadmin, aviso por correo/WhatsApp de alertas críticas, y que la caja de escritorio aplique la reversión de una recarga automáticamente (hoy bloquea la tarjeta y la escuela hace el ajuste).
 1. **Sincronización — mejoras**: la sincronización básica ya funciona (ver README §5). Falta: varias cajas vendiendo a la vez con saldos compartidos (requiere saldo calculado en el servidor a partir de movimientos y reservas en línea), pantalla en la PWA para ver/revocar equipos y cambiar el principal, envío de fotos por separado (hoy viajan dentro del lote), compresión de lotes grandes, alerta si la caja lleva mucho tiempo sin sincronizar, y edición de productos desde la PWA (hoy el catálogo se administra en la caja).
-2. **Envío real de correos/SMS**: implementar el *mailer* con Resend / SendGrid / Amazon SES y Twilio (SMS o WhatsApp) para contraseñas temporales y recuperación.
+2. **Envío real de correos/SMS**: implementar el *mailer* con Resend / SendGrid / Amazon SES y Twilio (SMS o WhatsApp) para enviar contraseñas y avisos (la recuperación por correo está desactivada por política).
 3. **Firma de código**: certificado de Windows (OV/EV) para evitar SmartScreen, y Apple Developer ID + notarización para macOS.
 4. **Respaldos automáticos**: copia diaria programada en el escritorio (carpeta elegida o nube) y restauración desde la interfaz; en el servidor, cron + almacenamiento externo (S3/Backblaze) y prueba periódica de restauración.
 5. **Aviso de privacidad y consentimiento** (LFPDPPP) integrados en el registro de la PWA, y opción de baja/anonimización de alumnos.
@@ -25,7 +27,7 @@ Lista priorizada de lo que falta o conviene pulir después de la versión 1.0.
 ## Multi-escuela (siguientes pasos)
 30. **Cobro de la cuota** a cada escuela (Stripe/Mercado Pago con suscripción) y suspensión automática por falta de pago; hoy el plan es una nota.
 31. Personalizar por escuela: logo, colores, nombre en la PWA y subdominio (`colegio.zuki.mx`).
-32. Bitácora del superadmin (quién creó/suspendió escuelas o restableció contraseñas) y acceso de "soporte" de solo lectura a una escuela.
+32. ~~Bitácora del superadmin~~ (hecho en v2: *Bitácora*). Falta: acceso de "soporte" de solo lectura a una escuela y exportar la bitácora a CSV.
 33. Reportes globales exportables (CSV/Excel) y gráfica de ventas por escuela en el panel del superadmin.
 34. Mover una caja a otra escuela sin base nueva (hoy se exige base nueva para no mezclar datos) y transferir un alumno entre escuelas conservando historial.
 35. Correo/SMS al crear la escuela con el acceso del administrador (hoy la contraseña temporal se muestra en pantalla).
@@ -35,7 +37,7 @@ Lista priorizada de lo que falta o conviene pulir después de la versión 1.0.
 17. **NTAG424 DNA** con validación SUN/SDM para impedir la clonación del UID.
 18. Refresh token en **cookie HttpOnly + SameSite** en lugar de `localStorage`; 2FA opcional para administradores.
 19. Bloqueo de pantalla del punto de venta por inactividad y PIN rápido para cambiar de cajero.
-20. Bitácora de auditoría de acciones administrativas (cambios de precio, ajustes, desbloqueos).
+20. Bitácora: ya registra recargas, borrados, contraseñas, cuentas, accesos y emergencia. Falta registrar cambios de precio y hacer las alertas por correo/WhatsApp al superadmin (hoy solo se ven en el panel).
 21. **Base de datos del servidor**: con muchas escuelas, migrar a PostgreSQL (con *row-level security* por `school_id` como segunda barrera) y límites de intentos en Redis para varias instancias.
 22. Cifrado de la base local (SQLCipher) y del respaldo.
 23. Actualizaciones automáticas de la app de escritorio (`electron-updater` + servidor de releases; requiere firma).

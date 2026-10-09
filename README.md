@@ -24,10 +24,10 @@ Forma de operar recomendada: la **caja de escritorio** vende y recarga (funciona
 - Productos: alta, edición, precio, categoría, activar/desactivar, eliminar (si tiene ventas solo se desactiva). Categorías.
 - Tarjetas: registrar UID (con lector o a mano), asignar a alumno, bloquear/activar, **reportar perdida y transferir saldo** a una tarjeta nueva, ajustes de saldo con motivo.
 - Tutores y alumnos: altas, edición, foto opcional, límites y prohibiciones de cualquier alumno.
-- Usuarios (admin, cajero, tutor), contraseña temporal con **cambio obligatorio** al primer inicio.
+- Usuarios (admin, cajero, tutor); las contraseñas las asigna únicamente el superadministrador (se muestran una sola vez).
 - Movimientos con filtros (fechas, tipo, estado, alumno, tarjeta) y exportación a CSV.
 - Respaldo de la base de datos (escritorio).
-- En la PWA: **códigos de invitación** por alumno y alta de tutores con contraseña temporal enviada por correo/SMS.
+- En la PWA: **códigos de invitación** por alumno y alta de tutores con contraseña generada (se muestra una vez y se puede enviar por correo/SMS).
 
 **Cajero / punto de venta**
 - Lectura de tarjeta: campo con foco automático compatible con lectores USB tipo teclado (Enter envía), captura de “ráfagas” del lector aunque el foco no esté en el campo, lector PC/SC opcional (ACR122U) y Web NFC en Android (PWA).
@@ -49,7 +49,7 @@ Zuki Company vende el sistema a varias escuelas. Un solo servidor atiende a toda
 
 | Panel | Quién | Qué ve |
 |---|---|---|
-| **Superadministrador** (`superadmin`) | Zuki Company | **Instituciones**: lista de escuelas con estado (*activa / en prueba / suspendida*), alta/edición/suspensión, alta del administrador de cada escuela con **contraseña temporal**, usuarios (restablecer contraseña, activar/desactivar), estadísticas por escuela (ventas, recargas, tarjetas activas, alumnos, padres vinculados, saldo, **última sincronización de su caja**) y **totales globales**, cajas vinculadas (revocar, hacer principal), **hoja de códigos de invitación** por escuela, nota de plan/cuota. No opera ventas ni ve el panel de ninguna escuela (`/api/rpc` le responde 403). |
+| **Superadministrador** (`superadmin`) | Zuki Company | **Escuelas**: lista de escuelas con estado (*activa / en prueba / suspendida*), alta/edición/suspensión, alta del administrador de cada escuela con contraseña generada, usuarios (asignar contraseña, activar/desactivar), estadísticas por escuela (ventas, recargas, tarjetas activas, alumnos, padres vinculados, saldo, **última sincronización de su caja**) y **totales globales**, cajas vinculadas (revocar, hacer principal), **hoja de códigos de invitación** por escuela, nota de plan/cuota. Además **Cuentas, Seguridad y emergencia, Alertas y Bitácora** (§4b). No opera ventas ni ve el panel de ninguna escuela (`/api/rpc` le responde 403). |
 | **Escuela** (`admin`, `cajero`) | Personal de cada escuela | Solo su escuela: alumnos, tarjetas, productos/categorías, movimientos, tablero, usuarios (su personal y los tutores con hijos en su escuela), invitaciones y cajas. Un id o UID de otra escuela responde **404 (no encontrado)**. |
 | **Padres** (`tutor`) | Padres/tutores | Solo **sus** hijos, aunque estén en **escuelas distintas** (cada hijo muestra su escuela; el catálogo para prohibir productos es el de la escuela de ese hijo). |
 
@@ -60,7 +60,7 @@ Zuki Company vende el sistema a varias escuelas. Un solo servidor atiende a toda
 - **Migración automática**: al abrir una base de una versión anterior (una sola escuela), todos los datos pasan a una escuela por defecto *“Mi escuela”* (incluido el equipo principal). Probado con una base real de la versión anterior (`test/fixtures/v1-escritorio.db`).
 - **Programar tarjetas** (escritorio, admin): 1) **leer tarjetas en lote** (acercarlas una tras otra; se registran en inventario y se avisan duplicados); 2) **asignarlas a los alumnos sin tarjeta** (propuesta en orden de lectura por grado y nombre, o “Leer” junto a un alumno y acercar su tarjeta); 3) **hoja de códigos para padres**: la caja se sincroniza, pide al servidor un código por alumno (reutiliza los vigentes) y genera un **PDF** o lo **imprime** (un recuadro recortable por alumno con nombre, grado, tarjeta, código y pasos). Ejemplo: `docs/capturas/hoja-codigos-ejemplo.pdf`.
 
-**Datos demo del servidor** (`npm run server` en desarrollo): superadmin **`zuki` / `zuki123`**; escuela 1 *Colegio Morelos (demo)* con `admin`/`admin123`, `cajero`/`cajero123`, tutores `maria`, `juan` (los mismos datos del escritorio); escuela 2 *Instituto Valladolid (demo)* (en prueba) con `admin2`/`admin123`, `cajero2`/`cajero123`, alumnos Lucía (hija de **María**, para ver un tutor con hijos en dos escuelas) y Mateo, tarjetas `05A1A1A1A1A1A1`, `05B2B2B2B2B2B2`, `05C3C3C3C3C3C3`. En producción el superadmin se crea con `SUPERADMIN_USER`/`SUPERADMIN_PASSWORD` y **debe cambiar la contraseña** al entrar.
+**Datos demo del servidor** (`npm run server` en desarrollo): dos escuelas de ejemplo (*Colegio Morelos (demo)* e *Instituto Valladolid (demo)*), un superadministrador, administradores, cajeros y tutores (María tiene hijos en las dos escuelas). Las **contraseñas de demostración ya no aparecen en las pantallas ni en este repositorio**: están en el archivo privado `cooperativa-nfc-credenciales.md` que se guarda fuera del repositorio. En producción (`NODE_ENV=production`) no se crean datos demo: el superadmin se crea con `SUPERADMIN_USER`/`SUPERADMIN_PASSWORD`.
 
 Capturas: `docs/capturas/w10-superadmin-escritorio.png`, `w13-superadmin-escuela-escritorio.png`, `w08-superadmin-movil.png`, `w09-superadmin-escuela-movil.png`, `w15-superadmin-tablet.png`, `w14-superadmin-hoja-codigos.png`, `w07-tutor-dos-escuelas-movil.png`, `18-programar-leer.png`, `19-programar-asignar.png`, `20-programar-hoja-codigos.png`.
 
@@ -89,18 +89,13 @@ Capturas: `docs/capturas/w10-superadmin-escritorio.png`, `w13-superadmin-escuela
 ### Primer uso
 La primera vez la app pregunta cómo empezar:
 - **Cargar datos de demostración** (usuarios, alumnos, tarjetas, productos y movimientos de ejemplo; ideal para capacitar).
-- **Empezar con base vacía**: solo existe `admin` / `admin123` y se pide cambiar la contraseña al entrar.
+- **Empezar con base vacía**: se crea el usuario `admin` con una **contraseña aleatoria de 12 caracteres** que se muestra una sola vez en un cuadro (anótela).
 
 Para volver a empezar, cierre la app y borre (o renombre) el archivo `cooperativa.db` indicado arriba.
 
 ### Credenciales de demostración
 
-| Rol | Usuario | Contraseña |
-|---|---|---|
-| Administrador | `admin` | `admin123` |
-| Cajero | `cajero` | `cajero123` |
-| Tutora (Sofía y Diego) | `maria` (o `maria@example.com` / `4431234567`) | `tutor123` |
-| Tutor (Valentina) | `juan` (o `juan@example.com`) | `tutor123` |
+Por seguridad ya no se muestran en la pantalla de inicio ni se publican aquí. Están en el archivo privado `cooperativa-nfc-credenciales.md` (fuera del repositorio).
 
 Tarjetas demo (UID): `04A1B2C3D4E5F6` (Sofía: Coca-Cola prohibida, límites $50 por compra / $60 diario / $250 semanal), `04B7C8D9E0F1A2` (Diego: categoría Refrescos prohibida, $80 diario), `04C3D4E5F6A7B8` (Valentina: $40 por compra, $600 mensual), `04D9E0F1A2B3C4` (sin asignar).
 
@@ -167,17 +162,17 @@ docs/capturas/     Capturas de pantalla
 
 ### Escritorio (local, sin internet)
 - Usuarios en la base local, contraseñas con **bcrypt**. La sesión vive en el proceso principal (el renderer nunca decide el rol); cada operación valida el rol en `service.js`.
-- Contraseña asignada por el admin ⇒ **cambio obligatorio** en el siguiente inicio (casilla configurable).
-- **Con servidor configurado** (*Ajustes → Servidor en la nube*): el admin/cajero inicia sesión con su cuenta **del servidor**. Si el servidor acepta, la cuenta se copia/actualiza en la base local (hash bcrypt) para poder entrar **sin internet** después. Si el servidor rechaza la contraseña, se rechaza. Si el servidor no responde (5 s), se usa el login local (*modo sin conexión*). Las cuentas de tutor siguen funcionando localmente. Si la cuenta tiene contraseña temporal en el servidor, primero hay que cambiarla en la PWA.
+- **Solo el superadministrador cambia contraseñas** (ver §4b). En el escritorio sin servidor la contraseña del `admin` se genera al crear la base; con servidor, las contraseñas vienen del servidor al iniciar sesión.
+- **Con servidor configurado** (*Ajustes → Servidor en la nube*): el admin/cajero inicia sesión con su cuenta **del servidor**. Si el servidor acepta, la cuenta se copia/actualiza en la base local (hash bcrypt) para poder entrar **sin internet** después. Si el servidor rechaza la contraseña, se rechaza. Si el servidor no responde (5 s), se usa el login local (*modo sin conexión*). Las cuentas de tutor siguen funcionando localmente. 
 
 ### Servidor / PWA
-- **Altas de tutores**: (1) el admin crea la cuenta con correo o teléfono y el servidor genera una **contraseña temporal** (se muestra una sola vez y se envía por el *mailer*); el tutor debe cambiarla al primer inicio. (2) El admin genera un **código de invitación por alumno** (`COOP-XXXX-XXXX`, vence en 30 días, un solo uso; generar otro invalida el anterior) que se entrega con la tarjeta; el padre se **autoregistra** en la PWA y queda vinculado. Un tutor ya registrado puede vincular más hijos con otro código. Si el alumno ya tenía tutor, el código transfiere la vinculación.
+- **Altas de tutores**: (1) el admin crea la cuenta con correo o teléfono y el servidor genera una **contraseña** (se muestra una sola vez, con botón para copiar, y se envía por el *mailer*). (2) El admin genera un **código de invitación por alumno** (`COOP-XXXX-XXXX`, vence en 30 días, un solo uso; generar otro invalida el anterior) que se entrega con la tarjeta; el padre se **autoregistra** en la PWA y queda vinculado. Un tutor ya registrado puede vincular más hijos con otro código. Si el alumno ya tenía tutor, el código transfiere la vinculación.
 - Inicio de sesión con usuario, **correo o teléfono** (10 dígitos).
 - **JWT de acceso** (HS256, 15 min) + **refresh token** opaco (30 días, guardado como hash SHA-256, **rotación** en cada uso y **detección de reutilización**: si se usa uno ya rotado, se revoca toda la familia).
-- **Límite de intentos**: 5 fallos por cuenta en 15 min y 30 por IP ⇒ HTTP 429. Recuperación limitada a 5 por hora.
-- **Cambio obligatorio de contraseña**: con `must_change_password` solo se permiten `/api/auth/me`, `/api/auth/change-password` y `/api/auth/logout*`; el resto responde 403 `DEBE_CAMBIAR_PASSWORD`.
+- **Límite de intentos**: 5 fallos por cuenta en 15 min y 30 por IP ⇒ HTTP 429. Además, **bloqueo persistente**: la cuenta del superadmin se bloquea 15 min tras 5 contraseñas incorrectas seguidas y las demás tras 10; se genera una alerta.
+- **Cambio obligatorio de contraseña** (solo superadmin con `SUPERADMIN_FORCE_CHANGE=1`): con `must_change_password` solo se permiten `/api/auth/me`, `/api/auth/change-password` y `/api/auth/logout*`; el resto responde 403 `DEBE_CAMBIAR_PASSWORD`.
 - **Cerrar sesión** (revoca el refresh token) y **cerrar sesión en todos los dispositivos** (revoca todos e incrementa `token_version`, lo que invalida de inmediato los JWT emitidos). Cambiar o restablecer la contraseña, o desactivar al usuario, también invalida sesiones.
-- **Recuperación de contraseña**: `/api/auth/forgot` responde igual exista o no la cuenta (no permite enumerar usuarios); genera un token aleatorio de un solo uso, válido 1 hora, y envía un enlace `APP_URL/?reset=<token>`.
+- **Recuperación de contraseña por correo: desactivada** (`/api/auth/forgot` y `/api/auth/reset` responden 403). Quien olvide su contraseña pide una nueva al superadministrador (*Cuentas → Contraseña*). El código sigue disponible con `createServer({ allowSelfReset: true })`.
 - **Envío real de correo/SMS**: el *mailer* es enchufable (`src/core/auth.js → consoleMailer`). En desarrollo **solo imprime el mensaje en la consola del servidor**. Para producción implemente un objeto `{ send({ to, channel, subject, text }) }` con un proveedor como **Resend**, **SendGrid** o **Amazon SES** (correo) o **Twilio** (SMS/WhatsApp) y páselo en `createServer({ mailer })`.
 - Roles **admin / cajero / tutor** verificados en cada endpoint (middleware + validación en el servicio; el tutor solo ve a sus hijos).
 - Encabezados `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`; CSP estricta en la PWA. El refresh token se guarda en `localStorage` (mitigado por la CSP sin scripts externos); ver `PENDIENTES.md` para migrarlo a cookie `HttpOnly`.
@@ -191,16 +186,43 @@ docs/capturas/     Capturas de pantalla
 | `APP_URL` | URL pública, usada en los enlaces de recuperación |
 | `NODE_ENV=production` | Desactiva datos demo y exige `JWT_SECRET` |
 | `SEED=1/0` | Fuerza o desactiva los datos demo |
-| `SUPERADMIN_USER`, `SUPERADMIN_PASSWORD` | Crea la cuenta del **superadministrador** (Zuki Company) si no existe; contraseña ≥ 8 y **cambio obligatorio** al primer inicio. Por defecto el usuario es `zuki`. |
-| `ADMIN_USER`, `ADMIN_PASSWORD`, `SCHOOL_NAME` | Opcional: crea una primera escuela con su administrador (cambio obligatorio). Normalmente las escuelas se crean desde el panel del superadmin. |
+| `SUPERADMIN_USER`, `SUPERADMIN_PASSWORD` | Crea la cuenta del **superadministrador** (Zuki Company) **solo si no existe** (contraseña ≥ 8). Ya no se obliga a cambiarla en cada reinicio. Por defecto el usuario es `zuki`. |
+| `SUPERADMIN_FORCE_CHANGE=1` | Opcional: obliga al superadmin recién creado a cambiar su contraseña al entrar. |
+| `SUPERADMIN_RESET_PASSWORD` | **Recuperación de emergencia** (ver §4b): al arrancar, pone esta contraseña al superadmin, lo reactiva y desbloquea. Se aplica una sola vez por valor; quítela después de entrar. |
+| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Guardado permanente **gratis** en Turso (ver §8). |
+| `BACKUP_DIR` | Carpeta de copias diarias cuando la base está en disco permanente (por defecto junto a la base; se guardan 14). |
+| `TZ` | Zona horaria (por defecto `America/Mexico_City`); se usa para el horario escolar y los cortes por día. |
+| `ADMIN_USER`, `ADMIN_PASSWORD`, `SCHOOL_NAME` | Opcional: crea una primera escuela con su administrador. Normalmente las escuelas se crean desde el panel del superadmin. |
 | `TRUST_PROXY=1` | Detrás de un proxy (Render, Railway, Nginx) para que el límite por IP use la IP real |
+
+### 4b. Seguridad y emergencia (superadministrador)
+
+Menú del superadmin: **Escuelas · Cuentas · Seguridad y emergencia · Alertas · Bitácora · Mi cuenta**.
+
+- **Política de contraseñas**: solo el superadmin asigna contraseñas (*Cuentas → 🔑 Contraseña*). Se muestra **una sola vez** con botón *Copiar* y no se guarda en texto en ningún lado (bcrypt); asignarla cierra las sesiones de esa persona. Admin, cajero y tutor no tienen pantalla ni API para cambiarla (`/api/auth/change-password` ⇒ 403 para ellos). El superadmin cambia la suya en *Mi cuenta* (mín. 10 caracteres).
+- **Cuentas**: todas las cuentas de todas las escuelas con jerarquía, escuela, estado (activa/desactivada/bloqueada por intentos), último acceso (con IP) y fecha de alta; activar/desactivar y desbloquear.
+- **Superadmin protegido**: no se puede borrar, degradar ni desactivar (triggers en SQLite además de las validaciones).
+- **Congelar recargas** (global o por escuela), **congelar ventas** y **solo lectura** por escuela. Las cajas de escritorio vinculadas reciben estas banderas en cada sincronización y bloquean localmente.
+- **Bloquear administradores** de una escuela (desactiva y cierra sus sesiones) y **cerrar sesiones** por escuela o de todos (incrementa `token_version`, lo que invalida los JWT al instante).
+- **ALERTA ROJA**: botón rojo con confirmación escrita (`ALERTA ROJA`). Pone todo en solo lectura, cierra todas las sesiones excepto la del superadmin y rechaza cualquier inicio de sesión que no sea del superadmin. *Desbloquear el sistema* lo revierte.
+- **Límite diario de recargas** por escuela, monto de "recarga grande" y horario escolar configurables (*Límites y horario*).
+- **Alertas automáticas**: recarga grande (por defecto ≥ $1,000), 3+ recargas a la misma tarjeta en 10 min, 10+ recargas del mismo usuario en 10 min, recargas fuera de horario o en fin de semana, posible **auto-recarga** (quien recarga es el mismo tutor del alumno: misma cuenta, correo, teléfono o nombre), límite diario superado, borrados, ráfagas de contraseñas incorrectas y bloqueos de cuenta.
+- **Revisar recargas**: marcar como sospechosa o **revertir** (crea un ajuste negativo; si la escuela usa caja de escritorio, que es dueña de los saldos, se bloquea la tarjeta y se marca la recarga para que la escuela haga el ajuste en la caja).
+- **Bitácora** (no se borra desde la app): quién, cuándo, IP y qué (recargas, borrados, contraseñas, roles/cuentas, accesos, acciones de emergencia), con filtros por fecha, tipo, escuela y texto.
+- **Borrado suave**: los productos borrados van a la **Papelera** y se pueden restaurar.
+- **Respaldo descargable**: *Seguridad → Descargar respaldo* (`GET /api/super-backup`, archivo `.db` de SQLite).
+
+**Recuperación de emergencia del superadmin** (si olvidó la contraseña o la cuenta quedó bloqueada):
+1. En Render → servicio → *Environment*, agregue `SUPERADMIN_RESET_PASSWORD` con una contraseña nueva (≥ 10 caracteres) y guarde (Render reinicia el servicio).
+2. Entre con su usuario y esa contraseña. Queda registrado en la Bitácora y aparece una alerta.
+3. **Borre la variable** `SUPERADMIN_RESET_PASSWORD` de Render (si la deja, no se vuelve a aplicar con el mismo valor, pero no conviene dejarla escrita).
 
 ---
 
 ## 5. Sincronización escritorio ↔ servidor
 
 ### Configurar (una vez)
-1. Despliegue el servidor **vacío** (`NODE_ENV=production`, sin datos demo) con `SUPERADMIN_USER`/`SUPERADMIN_PASSWORD`. El superadmin crea la escuela en **Instituciones → + Nueva escuela** y entrega al administrador de la escuela su usuario y contraseña temporal; este la cambia en la PWA.
+1. Despliegue el servidor **vacío** (`NODE_ENV=production`, sin datos demo) con `SUPERADMIN_USER`/`SUPERADMIN_PASSWORD`. El superadmin crea la escuela en **Escuelas → + Nueva escuela** y entrega al administrador de la escuela su usuario y contraseña.
 2. En la caja: *Ajustes → Servidor en la nube y sincronización*: escriba la URL, el usuario y la contraseña **del administrador de la escuela** y pulse **Vincular este equipo** (la caja queda ligada a esa escuela y toma su nombre). La contraseña no se guarda: el servidor entrega un **token de equipo** (guardado en `config.json` de la carpeta de datos, revocable desde el servidor).
 3. La primera sincronización envía **todo** lo existente (catálogo, alumnos, tarjetas con saldo, límites, prohibiciones e historial completo). Después se envían solo los cambios.
 4. En la PWA el administrador genera los **códigos de invitación** de cada alumno (los alumnos ya llegaron desde la caja) y se los entrega a los padres.
@@ -332,21 +354,36 @@ npm run dist:linux   # Linux → dist/CooperativaNFC-1.0.0-x86_64.AppImage (prue
 
 ---
 
-## 8. Desplegar el servidor (opcional)
+## 8. Desplegar el servidor y guardar los datos
 
-El servidor necesita un proceso Node **siempre encendido** y **disco persistente** para el archivo SQLite. **Netlify / Vercel (solo estático o funciones sin estado) no sirven por sí solos** para el backend; pueden alojar únicamente archivos estáticos.
+El servidor es Node + SQLite (sql.js, en memoria con escritura a archivo). Al arrancar indica el modo de guardado en `/api/health` (`persistence`) y en *Seguridad → Dónde se guardan los datos*:
 
-- **VPS** (DigitalOcean, Linode, Hetzner, AWS Lightsail; ~5 USD/mes): Node 20, `npm ci --omit=dev`, servicio `systemd` o `pm2` con las variables de la sección 4, Nginx/Caddy como proxy con HTTPS (Let's Encrypt), `TRUST_PROXY=1`.
-- **Render**: *Web Service* con `npm ci --omit=dev` / `node server/index.js`, **Persistent Disk** montado en `/data` y `DB_PATH=/data/servidor.db`.
-- **Railway / Fly.io**: usar el `Dockerfile` incluido y un **volumen** en `/data`.
-- HTTPS es obligatorio en producción (PWA, Web NFC y seguridad de tokens).
-- Respaldos: copie `servidor.db` a diario (cron + almacenamiento externo). Use una sola instancia (SQLite + límites en memoria); para escalar, migrar a PostgreSQL y Redis.
+| Modo | Cómo se activa | Costo | Notas |
+|---|---|---|---|
+| **temporal** | `DB_PATH` en `/tmp` sin Turso (situación actual en Render gratis) | 0 | **Se pierde todo** en cada reinicio o despliegue. Solo para demostraciones. |
+| **turso** | `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` | 0 (plan gratis de Turso) | Al arrancar descarga la última copia; tras cada cambio sube una copia comprimida (en ≤ 3–15 s) y al apagarse. Conserva la copia anterior. Riesgo: si el servidor se cae en esos segundos, se pierde lo último. |
+| **disco** | `DB_PATH=/var/data/servidor.db` con un *Persistent Disk* | Render Starter 7 USD/mes + disco ~0.25 USD/GB/mes | Lo más robusto. Copia diaria automática (14 días) en `BACKUP_DIR`. Sin "dormirse". |
+
+**Recomendación**: para una prueba piloto, Turso gratis. Para una escuela cobrando en serio, Render **Starter + disco 1 GB** (≈ 7.25 USD/mes): el plan gratis de Render se **duerme tras 15 min sin visitas** (la primera carga tarda ~1 min) y eso no sirve para una caja.
+
+**Turso (gratis)**:
+1. Cree una cuenta en https://turso.tech (con GitHub) y una base (*Create database*, región cercana, p. ej. `aws-us-east-1` o `dfw`).
+2. En la base: copie la **URL** (`libsql://NOMBRE-USUARIO.turso.io`) y genere un **token** (*Generate token*, permiso lectura y escritura, sin vencimiento).
+3. En Render → servicio → *Environment*: agregue `TURSO_DATABASE_URL` y `TURSO_AUTH_TOKEN`. Deje `DB_PATH=/tmp/servidor.db`. Guarde: Render reinicia y `/api/health` dirá `"persistence":"turso"`.
+4. La primera vez la base empieza vacía (se crea el superadmin con `SUPERADMIN_PASSWORD`); desde ahí los datos sobreviven a reinicios.
+
+**Render con disco (7 USD/mes)**:
+1. Render → servicio → *Settings* → *Instance type* → **Starter**.
+2. *Disks* → *Add disk*: Mount path `/var/data`, tamaño 1 GB.
+3. *Environment*: `DB_PATH=/var/data/servidor.db` (y quite las variables de Turso si las tenía). Guarde.
+
+Otras opciones: **VPS** (DigitalOcean, Hetzner, Lightsail; ~5 USD/mes) con Node 20, `npm ci --omit=dev`, `systemd`/`pm2`, Caddy/Nginx con HTTPS y `TRUST_PROXY=1`; **Railway / Fly.io** con el `Dockerfile` y un volumen. Netlify/Vercel no sirven para el backend. HTTPS es obligatorio. Use una sola instancia (SQLite + límites en memoria).
 
 ---
 
 ## 9. Pruebas realizadas
 
-- `npm test`: **36 pruebas, 36 aprobadas** — **multi-escuela** (`test/tenant.test.js`): el admin de la escuela A no ve ni modifica datos de la B en ningún endpoint (alumnos, tarjetas, productos, categorías, movimientos, usuarios, tablero, invitaciones, equipos, compras/recargas con tarjeta o producto ajeno ⇒ 404), UID repetido entre escuelas rechazado, tutor con hijos en dos escuelas ve solo los suyos, superadmin ve todo y totales correctos (los demás reciben 403), alta de escuela con admin temporal, suspensión (personal bloqueado, padres sí), sincronización aislada por escuela con conflicto de UID, códigos desde la caja solo de su escuela, y migración de una base real de la versión anterior; además: saldo insuficiente, límite por compra, diario (y reinicio al día siguiente), semanal/mensual, producto prohibido, categoría prohibida, tutor sin acceso a hijo ajeno (en servicio, IPC y REST), recarga actualiza saldo, tarjeta bloqueada, tarjeta perdida con transferencia de saldo, validaciones, persistencia en archivo; autenticación: login por usuario/correo/teléfono, límite de intentos (429), rotación y reutilización de refresh tokens, logout, expiración de sesión, contraseña temporal con cambio obligatorio, invitaciones (registro, un solo uso, vincular otro hijo), recuperación de contraseña, roles en cada endpoint, login del escritorio contra el servidor con respaldo sin conexión; **sincronización**: envío inicial completo con saldos idénticos e idempotencia (reenvío sin duplicados), límites/prohibiciones/bloqueo hechos por el tutor en el servidor que afectan la siguiente venta de la caja (y rechazos visibles para el tutor), el servidor gana en conflictos, cola sin conexión que se envía al reconectar, equipo secundario en solo lectura, bloqueo de ventas en línea y autenticación de los endpoints.
-- `npm run e2e` y `npm run e2e:web`: *Programar tarjetas* completo (lectura en lote con duplicado, asignación en orden, hoja con códigos del servidor y PDF generado), panel del superadmin en escritorio, tableta y celular (alta de escuela, detalle, hoja de códigos) y tutora con hijos en dos escuelas; además recorren todas las pantallas por rol, vinculan la caja con un servidor real y verifican que el saldo del servidor refleje una venta, hacen ventas aprobadas/rechazadas, simulan un lector USB tipo teclado, registro con invitación, cambio obligatorio, recuperación y sesión persistente.
+- `npm test`: **46 pruebas, 46 aprobadas**. Incluye las anteriores (multi-escuela, límites, prohibidos, tarjetas, autenticación, refresh tokens, invitaciones, sincronización) y **`test/security.test.js`** (10 pruebas): cuentas y contraseñas solo por superadmin, superadmin imborrable/no degradable, bloqueo por intentos y recuperación por variable de entorno, congelar recargas/ventas, solo lectura y límite diario, bloquear administradores y cerrar sesiones (JWT invalidados), ALERTA ROJA (logins bloqueados salvo superadmin), alertas de anomalías y reversión, papelera y respaldo, persistencia en Turso con un servidor falso, y caja de escritorio que recibe las banderas y genera alertas al sincronizar.
+- `npm run e2e:web` y `npm run e2e` (con `xvfb-run` en Linux): recorren todas las pantallas por rol con el diseño v2 y guardan capturas en `docs/capturas/v2/`; verifican que el inicio de sesión no muestra credenciales, que el superadmin asigna una contraseña y el cajero entra con ella, ALERTA ROJA y desbloqueo, que admin/cajero no pueden cambiar contraseñas, ventas aprobadas/rechazadas, lector USB tipo teclado, sincronización con un servidor real, programar tarjetas y registro con invitación.
 
 Más: integración con lectores en `INTEGRACION_NFC.md`; mejoras futuras en `PENDIENTES.md`.

@@ -66,7 +66,28 @@
       modal(title, h('p', null, text), [{ label: 'Cancelar', onClick: () => res(false) }, { label: 'Confirmar', class: 'primary', onClick: () => res(true) }]);
     });
   }
-  function field(label, input) { return h('label', null, label, input); }
+  function field(label, input, hint) { return h('label', null, label, input, hint ? h('span', { class: 'hint' }, hint) : null); }
+  // Encabezado de página: título grande, explicación corta y botones a la derecha
+  function pageHead(title, sub, ...actions) {
+    return h('div', { class: 'pagehead' }, h('div', { class: 'titles' }, h('h1', null, title), sub ? h('p', { class: 'sub' }, sub) : null),
+      actions.flat().filter(Boolean).length ? h('div', { class: 'actions' }, actions) : null);
+  }
+  const statCard = (l, v, sub) => h('div', { class: 'card stat' }, h('div', { class: 'l' }, l), h('div', { class: 'v' }, v), sub ? h('div', { class: 's' }, sub) : null);
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); toast('Copiado', 'ok'); } catch (_) {
+      const t = h('textarea', { style: { position: 'fixed', opacity: '0' } }); t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); toast('Copiado', 'ok'); } catch (__) { toast('No se pudo copiar; selecciónelo y cópielo a mano', 'err'); } t.remove();
+    }
+  }
+  // Muestra una contraseña UNA sola vez, con botón para copiar
+  function passShownModal(title, user, pass) {
+    modal(title, h('div', { class: 'form' }, h('p', null, 'Usuario para entrar: ', h('b', null, user.username)),
+      h('p', { style: { margin: 0 } }, 'Contraseña:'),
+      h('div', { class: 'copyrow' }, h('div', { class: 'bigcode', 'data-pass': '1' }, pass), h('button', { class: 'btn primary', onclick: () => copyText(pass) }, '📋 Copiar')),
+      h('div', { class: 'banner warn small' }, h('span', { class: 'ico' }, '⚠️'), h('div', null, 'Se muestra solo esta vez y no se guarda en ningún lado. Cópiela y entréguela a la persona por un medio seguro (en persona o por mensaje privado).'))),
+    [{ label: 'Listo, ya la copié', class: 'primary', onClick: () => render() }]);
+  }
+  const banner = (cls, ico, ...txt) => h('div', { class: 'banner ' + cls }, h('span', { class: 'ico' }, ico), h('div', null, txt));
   function badge(text, cls) { return h('span', { class: 'badge ' + (cls || text) }, text.replace('_', ' ')); }
   function avatar(photo, size) {
     const a = h('div', { class: 'avatar', style: size ? { width: size + 'px', height: size + 'px' } : null });
@@ -100,12 +121,20 @@
   }
 
   // ---------- navegación ----------
+  // Menú agrupado por tema: [título del grupo, [[vista, etiqueta, ícono], ...]]
   const NAV = {
-    superadmin: [['instituciones', 'Instituciones'], ['ajustes', 'Mi cuenta']],
-    admin: [['dashboard', 'Panel'], ['pos', 'Punto de venta'], ['recargas', 'Recargas'], ['productos', 'Productos'], ['tarjetas', 'Tarjetas'], ...(WEB ? [] : [['programar', 'Programar tarjetas']]), ['alumnos', 'Tutores y alumnos'], ['movimientos', 'Movimientos'], ['usuarios', 'Usuarios'], ['ajustes', 'Ajustes']],
-    cajero: [['pos', 'Punto de venta'], ['recargas', 'Recargas'], ['movimientos', 'Movimientos'], ['ajustes', 'Mi cuenta']],
-    tutor: [['hijos', 'Mis hijos'], ['movimientos', 'Historial'], ['ajustes', 'Mi cuenta']],
+    superadmin: [['Plataforma', [['instituciones', 'Escuelas', '🏫'], ['cuentas', 'Cuentas', '👥']]],
+      ['Seguridad', [['seguridad', 'Seguridad y emergencia', '🛡️'], ['alertas', 'Alertas', '🔔'], ['bitacora', 'Bitácora', '📜']]],
+      ['Mi cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
+    admin: [['Inicio', [['dashboard', 'Resumen', '📊']]],
+      ['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵']]],
+      ['Escuela', [['alumnos', 'Alumnos y padres', '🧒'], ['tarjetas', 'Tarjetas', '🪪'], ...(WEB ? [] : [['programar', 'Programar tarjetas', '📶']]), ['productos', 'Productos', '🍎']]],
+      ['Reportes', [['movimientos', 'Movimientos', '🧾']]],
+      ['Configuración', [['usuarios', 'Personal', '👥'], ['ajustes', 'Ajustes', '⚙️']]]],
+    cajero: [['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵'], ['movimientos', 'Movimientos', '🧾']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
+    tutor: [['Mi familia', [['hijos', 'Mis hijos', '🧒'], ['movimientos', 'Historial', '🧾']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
   };
+  const navItems = (role) => NAV[role].flatMap(([, items]) => items);
   const ROLE_LABEL = { superadmin: 'Superadministrador', admin: 'Administrador', cajero: 'Cajero', tutor: 'Padre / tutor' };
   function go(view, params = {}) { state.view = view; state.params = params; render(); }
 
@@ -114,14 +143,14 @@
     $app.innerHTML = '';
     if (!state.user) {
       const qs = new URLSearchParams(location.search);
-      if (WEB && qs.get('reset')) return renderReset(qs.get('reset'));
       if (WEB && state.view === 'registro') return renderRegister();
-      if (WEB && state.view === 'olvide') return renderForgot();
+      if (WEB && qs.get('reset')) history.replaceState(null, '', '/'); // la recuperación por correo ya no se usa
       return renderLogin();
     }
     if (state.user.must_change_password) return renderForceChange();
-    const items = NAV[state.user.role];
+    const items = navItems(state.user.role);
     const extra = state.user.role === 'superadmin' ? ['institucion'] : ['hijo'];
+    if (WEB && location.search) history.replaceState(null, '', '/');
     if (!state.view || !VIEWS[state.view] || !(items.some(([k]) => k === state.view) || extra.includes(state.view))) state.view = items[0][0];
     const main = h('div', { class: 'main' });
     const navActive = state.view === 'hijo' ? (state.user.role === 'tutor' ? 'hijos' : 'alumnos') : (state.view === 'institucion' ? 'instituciones' : state.view);
@@ -129,13 +158,39 @@
     $app.appendChild(h('div', { class: 'layout' },
       h('aside', { class: 'side' },
         h('div', { class: 'brand' }, '🪪 Cooperativa NFC', h('small', null, subtitle)),
-        h('nav', { class: 'nav' }, items.map(([k, l]) => h('a', { class: k === navActive ? 'active' : '', onclick: () => go(k) }, l))),
+        h('nav', { class: 'nav' }, NAV[state.user.role].map(([title, its]) => h('div', { class: 'nav-group' }, h('div', { class: 'nav-title' }, title),
+          its.map(([k, l, ico]) => h('a', { class: k === navActive ? 'active' : '', tabindex: '0', 'data-view': k, onclick: () => go(k), onkeydown: (e) => { if (e.key === 'Enter') go(k); } },
+            h('span', { class: 'ico' }, ico), h('span', null, l), k === 'alertas' && state.alertCount ? h('span', { class: 'count' }, String(state.alertCount)) : null))))),
         !WEB && state.user.role !== 'tutor' ? h('div', { id: 'syncind', class: 'syncind', title: 'Clic para sincronizar ahora', onclick: () => window.coop.sync.now().then(updateSyncInd) }) : null,
-        h('div', { class: 'who' }, h('b', null, state.user.full_name), ROLE_LABEL[state.user.role],
-          h('div', { style: { marginTop: '8px' } }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión')))),
+        h('div', { class: 'who' }, h('b', null, state.user.full_name), h('span', null, ROLE_LABEL[state.user.role]),
+          h('div', { style: { marginTop: '10px' } }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión')))),
       main));
     if (!WEB && state.user.role !== 'tutor') window.coop.sync.status().then(updateSyncInd);
+    // Aviso de seguridad (recargas/ventas congeladas, solo lectura) para el personal de la escuela
+    if (['admin', 'cajero'].includes(state.user.role)) {
+      window.coop.call('securityStatus').then((r) => {
+        const f = r && r.ok ? r.data : null; if (!f) return;
+        const msgs = [];
+        if (f.lockdown) msgs.push('El sistema está en ALERTA ROJA: solo se puede consultar.');
+        if (f.read_only) msgs.push('La escuela está en modo SOLO LECTURA por seguridad.');
+        if (f.freeze_recharges) msgs.push('Las RECARGAS están congeladas por seguridad.');
+        if (f.freeze_sales) msgs.push('Las VENTAS están congeladas por seguridad.');
+        if (msgs.length) main.prepend(banner('err', '⛔', h('b', null, msgs.join(' ')), h('div', { class: 'small' }, 'Si cree que es un error, comuníquese con el administrador de la plataforma.')));
+      }).catch(() => {});
+    }
+    if (state.user.role === 'superadmin') refreshAlertCount();
     Promise.resolve(VIEWS[state.view](main, state.params)).catch((e) => { main.appendChild(h('div', { class: 'result err' }, e.message)); });
+  }
+  // Número de alertas sin atender (insignia roja en el menú del superadministrador)
+  function refreshAlertCount() {
+    if (!window.coop.superCall) return;
+    window.coop.superCall('listAlerts', {}).then((r) => {
+      const n = r && r.ok ? r.data.length : 0;
+      if (n === state.alertCount) return; state.alertCount = n;
+      const a = document.querySelector('.nav a[data-view="alertas"]'); if (!a) return;
+      let c = a.querySelector('.count'); if (!n) { if (c) c.remove(); return; }
+      if (!c) { c = h('span', { class: 'count' }); a.appendChild(c); } c.textContent = String(n);
+    }).catch(() => {});
   }
   let cleanups = [];
   function onCleanup(fn) { cleanups.push(fn); }
@@ -145,25 +200,25 @@
   function renderLogin() {
     const u = h('input', { placeholder: 'Usuario, correo o teléfono', autofocus: true, autocomplete: 'username' });
     const p = h('input', { placeholder: 'Contraseña', type: 'password', autocomplete: 'current-password' });
-    const err = h('div', { class: 'small', style: { color: 'var(--err)', minHeight: '18px' } });
+    const err = h('div', { class: 'small', role: 'alert', style: { color: 'var(--err)', minHeight: '20px', fontWeight: 600 } });
     const submit = async (e) => {
       e.preventDefault(); err.textContent = '';
       try { state.user = await call('login', { username: u.value, password: p.value }); state.view = null; render(); if (state.user && state.user.offline) toast('Servidor no disponible: sesión iniciada en modo sin conexión'); } catch (ex) { err.textContent = ex.message; p.select(); }
     };
     $app.appendChild(h('div', { class: 'login-wrap' }, h('form', { class: 'card login form', onsubmit: submit },
-      h('div', { class: 'logo' }, '🪪'), h('h1', null, 'Cooperativa NFC'),
+      h('div', { class: 'logo' }, '🪪'), h('h1', null, 'Cooperativa NFC'), h('p', { class: 'tag' }, 'Tiendita escolar con tarjeta'),
       field('Usuario, correo o teléfono', u), field('Contraseña', p), err,
-      h('button', { class: 'btn primary lg', type: 'submit' }, 'Entrar'),
-      WEB ? h('div', { class: 'row', style: { justifyContent: 'space-between' } },
-        h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('olvide'); } }, '¿Olvidaste tu contraseña?'),
-        h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('registro'); } }, 'Tengo un código de invitación')) : null,
-      h('div', { class: 'demo' }, h('b', null, 'Accesos de demostración:'), h('br'), 'Administrador: admin / admin123', h('br'), 'Cajero: cajero / cajero123', h('br'), 'Tutores: maria / tutor123 · juan / tutor123', WEB ? [h('br'), 'Superadmin (Zuki): zuki / zuki123 · Escuela 2: admin2 / admin123'] : null, h('br'), 'Cambia estas contraseñas antes de usar la app en producción.'))));
+      h('button', { class: 'btn primary lg block', type: 'submit' }, 'Entrar'),
+      WEB ? h('div', { class: 'links' },
+        h('a', { href: '#', class: 'btn block', onclick: (e) => { e.preventDefault(); go('registro'); } }, 'Soy padre/madre: tengo un código de invitación'),
+        h('div', { class: 'note' }, '¿Olvidó su contraseña? Pida una nueva a la administración de su escuela.')) : null)));
     setTimeout(() => u.focus(), 50);
   }
 
   // ---------- pantallas de cuenta (cambio obligatorio, recuperación, registro) ----------
   function authCard(title, ...kids) {
     $app.appendChild(h('div', { class: 'login-wrap' }, h('div', { class: 'card login form' }, h('div', { class: 'logo' }, '🪪'), h('h1', null, title), ...kids)));
+    const f = $app.querySelector('input'); if (f) setTimeout(() => f.focus(), 50);
   }
   function renderForceChange() {
     const cur = h('input', { type: 'password', autocomplete: 'current-password' }); const n1 = h('input', { type: 'password', autocomplete: 'new-password' }); const n2 = h('input', { type: 'password', autocomplete: 'new-password' });
@@ -173,9 +228,9 @@
       if (n1.value !== n2.value) { err.textContent = 'Las contraseñas nuevas no coinciden'; return; }
       try { state.user = await call('changePassword', { current: cur.value, next: n1.value }); toast('Contraseña actualizada', 'ok'); render(); } catch (e) { err.textContent = e.message; }
     };
-    authCard('Cambia tu contraseña', h('p', { class: 'muted small' }, `Hola ${state.user.full_name}. Tu contraseña es temporal; crea una nueva para continuar.`),
-      field('Contraseña temporal / actual', cur), field('Nueva contraseña (mín. 6)', n1), field('Repetir nueva contraseña', n2), err,
-      h('button', { class: 'btn primary lg', onclick: go2 }, 'Guardar y continuar'), h('button', { class: 'btn', onclick: logout }, 'Cerrar sesión'));
+    authCard('Cambie su contraseña', h('p', { class: 'tag' }, `Hola ${state.user.full_name}. Por seguridad, cree una contraseña nueva para continuar.`),
+      field('Contraseña actual', cur), field('Contraseña nueva', n1, 'Mínimo 10 caracteres. Use una frase fácil de recordar.'), field('Repita la contraseña nueva', n2), err,
+      h('button', { class: 'btn primary lg block', onclick: go2 }, 'Guardar y continuar'), h('button', { class: 'btn block', onclick: logout }, 'Cerrar sesión'));
   }
   function renderForgot() {
     const id = h('input', { placeholder: 'Correo, teléfono o usuario' }); const msg = h('div', { class: 'small' });
@@ -198,16 +253,16 @@
     const email = h('input', { type: 'email', autocomplete: 'email' }); const phone = h('input', { type: 'tel', autocomplete: 'tel', placeholder: '10 dígitos' });
     const p1 = h('input', { type: 'password', autocomplete: 'new-password' }); const p2 = h('input', { type: 'password', autocomplete: 'new-password' });
     const msg = h('div', { class: 'small', style: { color: 'var(--err)' } });
-    authCard('Crear cuenta de tutor', h('p', { class: 'muted small' }, 'Use el código de invitación que le entregó la cooperativa junto con la tarjeta de su hijo(a).'),
+    authCard('Crear mi cuenta', h('p', { class: 'tag' }, 'Escriba el código de invitación que le entregó la escuela junto con la tarjeta de su hijo(a).'),
       field('Código de invitación', code), field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone)),
       field('Contraseña (mín. 8)', p1), field('Repetir contraseña', p2), msg,
-      h('button', { class: 'btn primary lg', onclick: async () => {
+      h('button', { class: 'btn primary lg block', onclick: async () => {
         msg.textContent = '';
         if (p1.value !== p2.value) { msg.textContent = 'Las contraseñas no coinciden'; return; }
         const r = await window.coop.auth.register({ code: code.value, full_name: name.value, email: email.value || null, phone: phone.value || null, password: p1.value });
         if (!r.ok) { msg.textContent = r.error; return; }
         state.user = r.data; state.view = null; toast('¡Cuenta creada! Su hijo(a) ya está vinculado.', 'ok'); render();
-      } }, 'Crear cuenta'), h('button', { class: 'btn', onclick: () => go(null) }, 'Volver'));
+      } }, 'Crear cuenta'), h('button', { class: 'btn block', onclick: () => go(null) }, 'Volver'));
   }
 
   // ---------- lector de tarjetas (teclado USB + PC/SC por IPC) ----------
@@ -233,9 +288,10 @@
   const VIEWS = {};
 
   VIEWS.dashboard = async (main) => {
-    main.appendChild(h('h1', null, 'Panel de la cooperativa'));
     const d = await call('dashboard');
-    const stat = (l, v, sub) => h('div', { class: 'card stat' }, h('div', { class: 'l' }, l), h('div', { class: 'v' }, v), sub ? h('div', { class: 'small muted' }, sub) : null);
+    main.appendChild(pageHead('Resumen de la cooperativa', `${d.school_name || 'Su escuela'} · cifras de hoy, la semana y el mes`, h('button', { class: 'btn primary', onclick: () => go('pos') }, '🛒 Ir a cobrar')));
+    const stat = statCard;
+    main.appendChild(h('div', { class: 'section-title', style: { marginTop: 0 } }, 'Ventas'));
     main.appendChild(h('div', { class: 'grid g4' },
       stat('Ventas de hoy', money(d.sales_day_cents), `${d.sales_day_count} ventas`),
       stat('Ventas de la semana', money(d.sales_week_cents)),
@@ -245,7 +301,7 @@
       stat('Recargas del mes', money(d.recharges_month_cents), 'Total histórico ' + money(d.recharges_total_cents)),
       stat('Saldo en tarjetas', money(d.balance_in_cards_cents), 'Dinero de los alumnos'),
       stat('Rechazos de hoy', String(d.rejected_today), 'Por límites, saldo o prohibiciones')));
-    main.appendChild(h('div', { class: 'grid', style: { gridTemplateColumns: '2fr 1fr', marginTop: '16px' } },
+    main.appendChild(h('div', { class: 'grid', style: { gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', marginTop: '20px' } },
       h('div', { class: 'card chart' }, h('h2', null, 'Ventas por día (últimos 14 días)'), barChart(d.sales_by_day)),
       h('div', { class: 'card' }, h('h2', null, 'Más vendidos del mes'),
         d.top_products.length ? h('table', null, h('tr', null, h('th', null, 'Producto'), h('th', { class: 'right' }, 'Piezas'), h('th', { class: 'right' }, 'Total')),
@@ -284,7 +340,7 @@
     const prodBox = h('div', { class: 'products card' });
     const cartBox = h('div', { class: 'items' });
     const totalEl = h('span');
-    const payBtn = h('button', { class: 'btn ok lg', onclick: () => charge() }, 'Cobrar (F2)');
+    const payBtn = h('button', { class: 'btn ok lg block', onclick: () => charge() }, '✔ Cobrar (F2)');
     const nfcLbl = h('span', { class: 'small muted' });
     window.coop.nfcStatus().then((s) => { nfcLbl.textContent = s.message; });
     const webNfcBtn = window.coop.startWebNfc && 'NDEFReader' in window ? h('button', { class: 'btn', onclick: () => window.coop.startWebNfc().catch((e) => toast(e.message, 'err')) }, 'Leer con NFC del teléfono') : null;
@@ -292,7 +348,7 @@
 
     function renderInfo() {
       info.innerHTML = '';
-      if (!card) { info.appendChild(h('div', { class: 'muted' }, 'Sin tarjeta. Acerque la tarjeta del alumno al lector.')); return; }
+      if (!card) { info.appendChild(h('div', { class: 'muted', style: { fontSize: '1.1rem' } }, '🪪 Acerque la tarjeta del alumno al lector.')); return; }
       const c = card.child;
       put(info, avatar(c && c.photo), h('div', { class: 'grow' },
         h('div', { style: { fontSize: '1.2rem', fontWeight: 700 } }, c ? c.full_name : 'Tarjeta sin asignar', ' ', badge(card.status)),
@@ -359,11 +415,11 @@
     document.addEventListener('keydown', fkey); onCleanup(() => document.removeEventListener('keydown', fkey));
     listenCardReader(lookup);
 
-    put(main, h('div', { class: 'row', style: { marginBottom: '10px' } }, h('h1', { style: { margin: 0 } }, 'Punto de venta'), h('div', { class: 'grow' }), webNfcBtn, nfcLbl),
+    put(main, pageHead('Cobrar', 'Acerque la tarjeta del alumno, toque los productos y presione Cobrar.', webNfcBtn, nfcLbl),
       h('div', { class: 'pos' },
         h('div', { class: 'left' }, h('div', { class: 'uidbox' }, uidIn, h('button', { class: 'btn primary', onclick: () => lookup(uidIn.value) }, 'Leer')), info, result, prodBox),
         h('div', { class: 'card cart' }, h('h2', null, 'Carrito'), cartBox, h('div', { class: 'total' }, h('span', null, 'Total'), totalEl), payBtn,
-          h('button', { class: 'btn', style: { marginTop: '8px' }, onclick: () => { cart = []; renderCart(); } }, 'Vaciar carrito (Esc limpia todo)'))));
+          h('button', { class: 'btn block', style: { marginTop: '10px' }, onclick: () => { cart = []; renderCart(); } }, 'Vaciar carrito'), h('p', { class: 'small muted center' }, 'Tecla Esc: empezar de nuevo'))));
     renderInfo(); renderProducts(); renderCart();
     setTimeout(() => uidIn.focus(), 50);
   };
@@ -371,15 +427,15 @@
   // ----- Recargas -----
   VIEWS.recargas = async (main) => {
     let card = null;
-    const uidIn = h('input', { placeholder: 'Acerque la tarjeta o escriba el UID y presione Enter', style: { fontSize: '1.15rem', padding: '12px' } });
+    const uidIn = h('input', { placeholder: 'Acerque la tarjeta o escriba el UID y presione Enter' });
     const info = h('div', { class: 'card cardinfo' });
-    const amount = h('input', { placeholder: '0.00', style: { fontSize: '1.3rem', width: '160px' } });
-    const note = h('input', { placeholder: 'Nota (opcional): efectivo, transferencia…', class: 'grow' });
+    const amount = h('input', { placeholder: '0.00', inputmode: 'decimal', style: { fontSize: '1.4rem', width: '180px' } });
+    const note = h('input', { placeholder: 'Efectivo, transferencia…' });
     const result = h('div');
     const recent = h('div', { class: 'card' });
     function renderInfo() {
       info.innerHTML = '';
-      if (!card) { info.appendChild(h('div', { class: 'muted' }, 'Lea una tarjeta para recargar.')); return; }
+      if (!card) { info.appendChild(h('div', { class: 'muted', style: { fontSize: '1.1rem' } }, '🪪 Lea la tarjeta del alumno para recargar.')); return; }
       put(info, avatar(card.child && card.child.photo), h('div', { class: 'grow' },
         h('div', { style: { fontSize: '1.2rem', fontWeight: 700 } }, card.child ? card.child.full_name : 'Tarjeta sin asignar', ' ', badge(card.status)),
         h('div', { class: 'small muted' }, card.child ? 'Tutor: ' + card.child.tutor_name : '', ' · UID ', card.uid)),
@@ -410,13 +466,13 @@
     uidIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); lookup(uidIn.value); } });
     amount.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doRecharge(); } });
     listenCardReader(lookup);
-    put(main, h('h1', null, 'Recargas'),
-      h('div', { class: 'grid', style: { gridTemplateColumns: '1fr 1fr' } },
-        h('div', { class: 'grid' }, h('div', { class: 'uidbox' }, uidIn, h('button', { class: 'btn primary', onclick: () => lookup(uidIn.value) }, 'Leer')), info,
-          h('div', { class: 'card form' }, h('h2', null, 'Monto a recargar (MXN)'),
-            h('div', { class: 'row' }, [50, 100, 200, 300, 500].map((v) => h('button', { class: 'btn', onclick: () => { amount.value = v.toFixed(2); amount.focus(); } }, '$' + v))),
-            h('div', { class: 'row' }, amount, note),
-            h('button', { class: 'btn primary lg', onclick: doRecharge }, 'Registrar recarga')), result),
+    put(main, pageHead('Recargas', 'Agregue saldo a la tarjeta de un alumno. 1) Lea la tarjeta  2) Elija el monto  3) Registre.'),
+      h('div', { class: 'grid g2' },
+        h('div', { class: 'grid', style: { alignContent: 'start' } }, h('div', { class: 'uidbox' }, uidIn, h('button', { class: 'btn primary', onclick: () => lookup(uidIn.value) }, 'Leer tarjeta')), info,
+          h('div', { class: 'card form' }, h('h2', null, 'Monto a recargar (pesos)'),
+            h('div', { class: 'amounts' }, [50, 100, 200, 300, 500].map((v) => h('button', { class: 'btn', onclick: () => { amount.value = v.toFixed(2); amount.focus(); } }, '$' + v))),
+            h('div', { class: 'row' }, field('Otro monto', amount), h('div', { class: 'grow' }, field('Nota (opcional)', note))),
+            h('button', { class: 'btn primary lg block', onclick: doRecharge }, '💵 Registrar recarga')), result),
         recent));
     renderInfo(); loadRecent(); setTimeout(() => uidIn.focus(), 50);
   };
@@ -445,13 +501,13 @@
       } }]);
     };
     const del = async (p) => {
-      if (!(await confirmBox('Eliminar producto', `¿Eliminar "${p.name}"? Si tiene ventas, solo se desactivará.`))) return;
+      if (!(await confirmBox('Eliminar producto', `¿Eliminar "${p.name}"? Se quitará de la lista; el administrador de la plataforma puede restaurarlo.`))) return;
       const r = await safe(() => call('deleteProduct', { id: p.id }));
       if (r) { toast(r.message || 'Producto eliminado', 'ok'); render(); }
     };
-    put(main, h('div', { class: 'row', style: { marginBottom: '14px' } }, h('h1', { style: { margin: 0 } }, 'Productos'), h('div', { class: 'grow' }),
-      h('button', { class: 'btn', onclick: newCat }, '+ Categoría'), h('button', { class: 'btn primary', onclick: () => edit(null) }, '+ Producto')),
-    h('div', { class: 'card' }, h('table', null, h('tr', null, h('th', null, 'Producto'), h('th', null, 'Categoría'), h('th', { class: 'right' }, 'Precio'), h('th', null, 'Estado'), h('th', null, '')),
+    put(main, pageHead('Productos', 'Lo que se vende en la tiendita. Los productos desactivados no aparecen al cobrar.',
+      h('button', { class: 'btn', onclick: newCat }, '+ Categoría'), h('button', { class: 'btn primary', onclick: () => edit(null) }, '+ Nuevo producto')),
+    h('div', { class: 'card tablewrap' }, h('table', null, h('tr', null, h('th', null, 'Producto'), h('th', null, 'Categoría'), h('th', { class: 'right' }, 'Precio'), h('th', null, 'Estado'), h('th', null, '')),
       products.map((p) => h('tr', null, h('td', null, p.name), h('td', null, p.category_name), h('td', { class: 'right' }, money(p.price_cents)),
         h('td', null, p.active ? badge('activo', 'ok') : badge('inactivo', '')),
         h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => edit(p) }, 'Editar'), ' ',
@@ -496,11 +552,11 @@
         } }]);
     };
     listenCardReader((uid) => { uidIn.value = uid; childSel.focus(); });
-    put(main, h('h1', null, 'Tarjetas NFC'),
-      h('div', { class: 'card', style: { marginBottom: '16px' } }, h('h2', null, 'Registrar tarjeta'),
+    put(main, pageHead('Tarjetas', 'Registre tarjetas nuevas, asígnelas a un alumno o repórtelas como perdidas.'),
+      h('div', { class: 'card', style: { marginBottom: '20px' } }, h('h2', null, 'Registrar una tarjeta'),
         h('div', { class: 'row' }, uidIn, childSel, h('button', { class: 'btn primary', onclick: register }, 'Registrar')),
         h('p', { class: 'small muted' }, 'Con un lector USB tipo teclado, haga clic en el campo UID y acerque la tarjeta. Se pueden registrar tarjetas sin asignar (inventario) y asignarlas después.')),
-      h('div', { class: 'card' }, h('table', null, h('tr', null, h('th', null, 'UID'), h('th', null, 'Estado'), h('th', null, 'Alumno'), h('th', null, 'Tutor'), h('th', { class: 'right' }, 'Saldo'), h('th', null, '')),
+      h('div', { class: 'card tablewrap' }, h('table', null, h('tr', null, h('th', null, 'UID'), h('th', null, 'Estado'), h('th', null, 'Alumno'), h('th', null, 'Tutor'), h('th', { class: 'right' }, 'Saldo'), h('th', null, '')),
         cards.map((k) => h('tr', null, h('td', null, h('code', null, k.uid)), h('td', null, badge(k.status), k.blocked_by && k.status === 'bloqueada' ? h('div', { class: 'small muted' }, 'por ' + k.blocked_by) : null),
           h('td', null, k.child ? k.child.full_name : '—'), h('td', null, k.child ? k.child.tutor_name : '—'), h('td', { class: 'right' }, money(k.balance_cents)),
           h('td', { class: 'right' },
@@ -533,13 +589,13 @@
         } catch (e) { toast(e.message, 'err'); return false; }
       } }]);
     };
-    put(main, h('h1', null, 'Tutores y alumnos'),
+    put(main, pageHead('Alumnos y padres', 'Alumnos con su tarjeta y saldo, y los padres o tutores vinculados.'),
       h('div', { class: 'grid g2' },
-        h('div', { class: 'card' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Tutores'), h('button', { class: 'btn primary sm', onclick: () => (WEB ? tutorTempModal() : editTutor(null)) }, '+ Tutor')),
+        h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Padres / tutores'), h('button', { class: 'btn primary sm', onclick: () => (WEB ? tutorTempModal() : editTutor(null)) }, '+ Tutor')),
           h('table', null, h('tr', null, h('th', null, 'Nombre'), h('th', null, 'Usuario'), h('th', null, 'Hijos'), h('th', null, '')),
             tutors.map((t) => h('tr', null, h('td', null, t.full_name, h('div', { class: 'small muted' }, [t.phone, t.email].filter(Boolean).join(' · '))), h('td', null, t.username, t.active ? '' : ' (inactivo)'),
               h('td', null, (t.children || []).map((c) => c.full_name).join(', ') || '—'), h('td', null, h('button', { class: 'btn sm', onclick: () => editTutor(t) }, 'Editar')))))),
-        h('div', { class: 'card' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Alumnos'), h('button', { class: 'btn primary sm', onclick: () => editChild(null) }, '+ Alumno')),
+        h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Alumnos'), h('button', { class: 'btn primary sm', onclick: () => editChild(null) }, '+ Alumno')),
           h('table', null, h('tr', null, h('th', null, 'Alumno'), h('th', null, 'Tarjeta'), h('th', { class: 'right' }, 'Saldo'), h('th', null, '')),
             children.map((c) => h('tr', null, h('td', null, h('div', { class: 'row' }, avatar(c.photo, 34), h('div', null, c.full_name, c.active ? '' : ' (inactivo)', h('div', { class: 'small muted' }, `${c.grade || ''} · ${c.tutor ? c.tutor.full_name : ''}`)))),
               h('td', null, c.card ? [h('code', null, c.card.uid), ' ', badge(c.card.status)] : h('span', { class: 'muted' }, 'sin tarjeta')),
@@ -559,30 +615,30 @@
   // Alta de tutor con contraseña temporal generada por el servidor (se envía por correo/SMS)
   function tutorTempModal() {
     const name = h('input'); const email = h('input', { type: 'email' }); const phone = h('input', { type: 'tel', placeholder: '10 dígitos' });
-    modal('Nueva cuenta de tutor', h('div', { class: 'form' }, h('p', { class: 'small muted' }, 'Se genera una contraseña temporal; el tutor deberá cambiarla al entrar. Puede iniciar sesión con su correo o teléfono.'),
+    modal('Nueva cuenta de tutor', h('div', { class: 'form' }, h('p', { class: 'small muted' }, 'Se genera una contraseña automáticamente. El tutor entra con su correo o teléfono.'),
       field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone))),
     [{ label: 'Cancelar' }, { label: 'Crear cuenta', class: 'primary', onClick: async () => {
       const r = await window.coop.auth.createTutor({ full_name: name.value, email: email.value || null, phone: phone.value || null });
       if (!r.ok) { toast(r.error, 'err'); return false; }
-      modal('Cuenta creada', h('div', { class: 'form' }, h('p', null, `Usuario: ${r.data.user.username}`), h('p', null, 'Contraseña temporal:'),
-        h('div', { style: { fontSize: '1.6rem', fontWeight: 700, textAlign: 'center' } }, r.data.temporary_password),
-        h('p', { class: 'small muted' }, 'Se mostró solo esta vez. También se envió al tutor (en desarrollo aparece en la consola del servidor).')), [{ label: 'Listo', onClick: () => render() }]);
+      passShownModal('Cuenta creada', r.data.user, r.data.temporary_password);
     } }]);
   }
 
   function userModal(u, fixedRole) {
     const role = h('select', { disabled: !!u || !!fixedRole }, ['admin', 'cajero', 'tutor'].map((r) => h('option', { value: r, selected: (u ? u.role : fixedRole || 'cajero') === r }, ROLE_LABEL[r])));
     const username = h('input', { value: u ? u.username : '', disabled: !!u });
-    const name = h('input', { value: u ? u.full_name : '' }); const phone = h('input', { value: u ? u.phone || '' : '' }); const email = h('input', { value: u ? u.email || '' : '' });
-    const pass = h('input', { type: 'password', placeholder: u ? 'Dejar vacío para no cambiar' : 'Mínimo 6 caracteres' });
+    const name = h('input', { value: u ? u.full_name : '' }); const phone = h('input', { value: u ? u.phone || '' : '', type: 'tel' }); const email = h('input', { value: u ? u.email || '' : '', type: 'email' });
+    const pass = h('input', { type: 'password', placeholder: 'Mínimo 6 caracteres', autocomplete: 'new-password' });
     const active = h('input', { type: 'checkbox', checked: u ? u.active : true });
-    const mustChange = h('input', { type: 'checkbox', checked: true });
-    modal(u ? 'Editar usuario' : 'Nuevo usuario', h('div', { class: 'form' }, field('Rol', role), field('Usuario (para iniciar sesión)', username), field('Nombre completo', name),
-      h('div', { class: 'grid g2' }, field('Teléfono', phone), field('Correo', email)), field('Contraseña', pass), h('label', { class: 'check' }, mustChange, u ? 'Si asigno contraseña, pedir cambio al primer inicio' : 'Pedir cambio de contraseña al primer inicio'), u ? h('label', { class: 'check' }, active, 'Usuario activo') : null),
+    modal(u ? 'Editar usuario' : 'Nuevo usuario', h('div', { class: 'form' }, field('Puesto', role), field('Usuario (para iniciar sesión)', username), field('Nombre completo', name),
+      h('div', { class: 'grid g2' }, field('Teléfono', phone), field('Correo', email)),
+      u ? h('div', { class: 'banner info small' }, h('span', { class: 'ico' }, '🔑'), h('div', null, 'Las contraseñas solo las cambia el administrador de la plataforma (Zuki Company).'))
+        : field('Contraseña inicial', pass, 'Désela a la persona. Si la olvida, el administrador de la plataforma le asigna otra.'),
+      u ? h('label', { class: 'check' }, active, 'Cuenta activa (puede entrar)') : null),
     [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
       try {
-        if (u) await call('updateUser', { id: u.id, full_name: name.value, phone: phone.value, email: email.value, active: active.checked, password: pass.value || undefined, must_change_password: mustChange.checked });
-        else await call('createUser', { role: role.value, username: username.value, full_name: name.value, phone: phone.value, email: email.value, password: pass.value, must_change_password: mustChange.checked });
+        if (u) await call('updateUser', { id: u.id, full_name: name.value, phone: phone.value, email: email.value, active: active.checked });
+        else await call('createUser', { role: role.value, username: username.value, full_name: name.value, phone: phone.value, email: email.value, password: pass.value });
         toast('Usuario guardado', 'ok'); render();
       } catch (e) { toast(e.message, 'err'); return false; }
     } }]);
@@ -590,8 +646,8 @@
 
   VIEWS.usuarios = async (main) => {
     const users = await call('listUsers');
-    put(main, h('div', { class: 'row', style: { marginBottom: '14px' } }, h('h1', { style: { margin: 0 } }, 'Usuarios'), h('div', { class: 'grow' }), h('button', { class: 'btn primary', onclick: () => userModal(null) }, '+ Usuario')),
-      h('div', { class: 'card' }, h('table', null, h('tr', null, h('th', null, 'Nombre'), h('th', null, 'Usuario'), h('th', null, 'Rol'), h('th', null, 'Estado'), h('th', null, '')),
+    put(main, pageHead('Personal', 'Cuentas del personal de la escuela (administradores y cajeros) y de los padres.', h('button', { class: 'btn primary', onclick: () => userModal(null) }, '+ Nueva cuenta')),
+      h('div', { class: 'card tablewrap' }, h('table', null, h('tr', null, h('th', null, 'Nombre'), h('th', null, 'Usuario'), h('th', null, 'Rol'), h('th', null, 'Estado'), h('th', null, '')),
         users.map((u) => h('tr', null, h('td', null, u.full_name), h('td', null, u.username), h('td', null, ROLE_LABEL[u.role]), h('td', null, u.active ? badge('activo', 'ok') : badge('inactivo', '')),
           h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => userModal(u) }, 'Editar')))))));
   };
@@ -604,7 +660,7 @@
     const status = h('select', null, h('option', { value: '' }, 'Todos los estados'), h('option', { value: 'aprobado' }, 'aprobado'), h('option', { value: 'rechazado' }, 'rechazado'));
     const child = h('select', null, h('option', { value: '' }, 'Todos los alumnos'), children.map((c) => h('option', { value: c.id }, c.full_name)));
     const uid = state.user.role !== 'tutor' ? h('input', { placeholder: 'UID tarjeta' }) : null;
-    const box = h('div', { class: 'card' }); let rows = [];
+    const box = h('div', { class: 'card tablewrap' }); let rows = [];
     const isTutor = state.user.role === 'tutor';
     async function load() {
       const f = { from: from.value || undefined, to: to.value || undefined, type: type.value || undefined, status: status.value || undefined, child_id: child.value ? Number(child.value) : undefined, uid: uid && uid.value ? uid.value : undefined, limit: 1000 };
@@ -619,9 +675,10 @@
       const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
       const a = h('a', { href: URL.createObjectURL(blob), download: `movimientos-${new Date().toISOString().slice(0, 10)}.csv` }); document.body.appendChild(a); a.click(); a.remove();
     }
-    put(main, h('h1', null, isTutor ? 'Historial de movimientos' : 'Movimientos'),
-      h('div', { class: 'card row', style: { marginBottom: '14px' } }, field('Desde', from), field('Hasta', to), field('Tipo', type), field('Estado', status), field('Alumno', child), uid ? field('Tarjeta', uid) : null,
-        h('button', { class: 'btn primary', onclick: load, style: { alignSelf: 'flex-end' } }, 'Filtrar'), h('button', { class: 'btn', onclick: exportCsv, style: { alignSelf: 'flex-end' } }, 'Exportar CSV')),
+    put(main, pageHead(isTutor ? 'Historial' : 'Movimientos', isTutor ? 'Compras y recargas de sus hijos, incluidas las compras rechazadas.' : 'Ventas, recargas y ajustes. Use los filtros y exporte a Excel (CSV).',
+      h('button', { class: 'btn', onclick: exportCsv }, '⬇ Exportar a Excel (CSV)')),
+      h('div', { class: 'card filters' }, field('Desde', from), field('Hasta', to), field('Tipo', type), field('Estado', status), field('Alumno', child), uid ? field('Tarjeta', uid) : null,
+        h('button', { class: 'btn primary', onclick: load }, 'Buscar')),
       box);
     load();
   };
@@ -641,12 +698,12 @@
   // ----- Tutor: mis hijos -----
   VIEWS.hijos = async (main) => {
     const kids = await call('listChildren');
-    main.appendChild(h('div', { class: 'row', style: { marginBottom: '14px' } }, h('h1', { style: { margin: 0 } }, 'Mis hijos'), h('div', { class: 'grow' }),
+    main.appendChild(pageHead('Mis hijos', 'Toque a su hijo(a) para ver compras, poner límites o bloquear la tarjeta.',
       WEB ? h('button', { class: 'btn primary', onclick: () => {
         const code = h('input', { placeholder: 'COOP-XXXX-XXXX' });
         modal('Vincular otro hijo', h('div', { class: 'form' }, h('p', { class: 'small muted' }, 'Escriba el código de invitación que le dio la cooperativa.'), field('Código', code)),
           [{ label: 'Cancelar' }, { label: 'Vincular', class: 'primary', onClick: async () => { const r = await window.coop.auth.redeem(code.value); if (!r.ok) { toast(r.error, 'err'); return false; } toast(`${r.data.child.full_name} vinculado`, 'ok'); render(); } }]);
-      } }, '+ Vincular hijo con código') : null));
+      } }, '+ Agregar hijo con código') : null));
     if (!kids.length) { main.appendChild(h('div', { class: 'card empty' }, 'Aún no hay alumnos registrados a su nombre. Acuda a la cooperativa para registrar la tarjeta.')); return; }
     const sums = await Promise.all(kids.map((k) => call('childSummary', { child_id: k.id })));
     main.appendChild(h('div', { class: 'grid g2' }, sums.map((s) => {
@@ -747,11 +804,7 @@
     return h('table', { class: 'resp' }, h('tr', { class: 'head' }, headers.map((x) => h('th', { class: x.right ? 'right' : '' }, x.label))),
       rows.map((cells) => h('tr', null, cells.map((c, i) => h('td', { 'data-label': headers[i].label, class: headers[i].right ? 'right' : '' }, c)))));
   }
-  function tempPassModal(title, user, pass) {
-    modal(title, h('div', { class: 'form' }, h('p', null, 'Usuario: ', h('b', null, user.username)), h('p', null, 'Contraseña temporal (se pedirá cambiarla al entrar):'),
-      h('div', { class: 'bigcode' }, pass),
-      h('p', { class: 'small muted' }, 'Se muestra solo esta vez. Anótela o envíela al responsable de la escuela por un medio seguro.')), [{ label: 'Listo', class: 'primary', onClick: () => render() }]);
-  }
+  const tempPassModal = (title, user, pass) => passShownModal(title, user, pass);
   function schoolForm(s) {
     const name = h('input', { value: s ? s.name : '', placeholder: 'p. ej. Colegio Juárez Morelia' });
     const status = h('select', null, Object.entries(SCHOOL_STATUS).map(([k, l]) => h('option', { value: k, selected: (s ? s.status : 'prueba') === k }, l)));
@@ -782,7 +835,8 @@
   VIEWS.instituciones = async (main) => {
     const o = await superCall('overview');
     const t = o.totals;
-    const stat = (l, v, sub) => h('div', { class: 'card stat' }, h('div', { class: 'l' }, l), h('div', { class: 'v' }, v), sub ? h('div', { class: 'small muted' }, sub) : null);
+    const stat = statCard;
+    const sec = await superCall('securityOverview').catch(() => null);
     const q = h('input', { placeholder: 'Buscar escuela…', class: 'grow' });
     const fs = h('select', null, h('option', { value: '' }, 'Todos los estados'), Object.entries(SCHOOL_STATUS).map(([k, l]) => h('option', { value: k }, l)));
     const box = h('div');
@@ -800,7 +854,11 @@
         ])));
     };
     q.addEventListener('input', draw); fs.addEventListener('change', draw);
-    put(main, h('div', { class: 'row pagehead' }, h('h1', { style: { margin: 0 } }, 'Instituciones'), h('div', { class: 'grow' }), h('button', { class: 'btn primary', onclick: newSchoolModal }, '+ Nueva escuela')),
+    const P = sec && sec.persistence ? sec.persistence : {};
+    put(main, pageHead('Escuelas', 'Todas las escuelas que usan la cooperativa. Toque “Administrar” para ver su personal, cajas y códigos.', h('button', { class: 'btn primary', onclick: newSchoolModal }, '+ Nueva escuela')),
+      sec && sec.lockdown ? banner('red', '🚨', h('b', null, 'ALERTA ROJA ACTIVA. '), 'Todo está en solo lectura. ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('seguridad'); } }, 'Ir a Seguridad')) : null,
+      P.mode === 'temporal' ? banner('warn', '⚠️', h('b', null, 'Los datos son temporales. '), 'El servidor gratuito borra todo al reiniciarse. Antes de usarlo con una escuela real configure el guardado permanente (vea la guía, sección “Guardar los datos”).') : null,
+      sec && sec.open_alerts ? banner('info', '🔔', `Tiene ${sec.open_alerts} alerta(s) sin revisar. `, h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('alertas'); } }, 'Ver alertas')) : null,
       h('div', { class: 'grid g4 stats' },
         stat('Escuelas', String(t.schools), `${t.schools_activa} activas · ${t.schools_prueba} en prueba · ${t.schools_suspendida} suspendidas`),
         stat('Alumnos', String(t.students), `${t.tutors_linked} padres vinculados`),
@@ -810,14 +868,14 @@
         stat('Ventas del mes', money(t.sales_month_cents), 'Total histórico ' + money(t.sales_total_cents)),
         stat('Recargas del mes', money(t.recharges_month_cents), 'Total histórico ' + money(t.recharges_total_cents)),
         stat('Saldo en tarjetas', money(t.balance_cents), 'Dinero de alumnos (todas las escuelas)')),
-      h('div', { class: 'card', style: { marginTop: '16px' } }, h('div', { class: 'row', style: { marginBottom: '10px' } }, q, fs), box));
+      h('div', { class: 'card', style: { marginTop: '20px' } }, h('div', { class: 'row', style: { marginBottom: '12px' } }, q, fs), box));
     draw();
   };
 
   VIEWS.institucion = async (main, params) => {
     const d = await superCall('schoolDetail', { id: params.id });
     const s = d.school; const st = s.stats;
-    const stat = (l, v, sub) => h('div', { class: 'card stat' }, h('div', { class: 'l' }, l), h('div', { class: 'v' }, v), sub ? h('div', { class: 'small muted' }, sub) : null);
+    const stat = statCard;
     const edit = () => {
       const f = schoolForm(s);
       modal('Editar escuela', f.el, [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
@@ -837,10 +895,7 @@
           try { const r = await superCall('createStaff', { school_id: s.id, role: role.value, username: u.value, full_name: n.value, email: e.value || undefined }); tempPassModal('Usuario creado', r.user, r.temporary_password); } catch (er) { toast(er.message, 'err'); return false; }
         } }]);
     };
-    const resetPass = async (u) => {
-      if (!(await confirmBox('Restablecer contraseña', `Se generará una contraseña temporal para ${u.full_name} y se cerrarán sus sesiones. ¿Continuar?`))) return;
-      const r = await safe(() => superCall('resetStaffPassword', { user_id: u.id })); if (r) tempPassModal('Contraseña restablecida', r.user, r.temporary_password);
-    };
+    const resetPass = (u) => setPasswordModal(u);
     const genCodes = async () => {
       const kids = await superCall('listChildren', { school_id: s.id });
       const pending = kids.filter((k) => !k.tutor_id && k.active);
@@ -851,8 +906,8 @@
       showCodesSheet(rows, { school: s.name, url: location.origin });
     };
     const staffRows = d.staff.map((u) => [h('div', null, h('b', null, u.full_name), h('div', { class: 'small muted' }, u.email || '')), u.username, ROLE_LABEL[u.role],
-      u.active ? (u.must_change_password ? badge('contraseña temporal', 'warn') : badge('activo', 'ok')) : badge('inactivo', ''),
-      h('div', { class: 'row', style: { justifyContent: 'flex-end', gap: '6px' } }, h('button', { class: 'btn sm', onclick: () => resetPass(u) }, 'Restablecer contraseña'),
+      u.active ? badge('activo', 'ok') : badge('inactivo', ''),
+      h('div', { class: 'row', style: { justifyContent: 'flex-end', gap: '6px' } }, h('button', { class: 'btn sm', onclick: () => resetPass(u) }, '🔑 Contraseña'),
         h('button', { class: 'btn sm', onclick: async () => { if (await safe(() => superCall('setStaffActive', { user_id: u.id, active: !u.active }))) render(); } }, u.active ? 'Desactivar' : 'Activar'))]);
     const devRows = d.devices.map((x) => [h('div', null, h('b', null, x.name), x.primary ? [' ', badge('principal', 'ok')] : null, h('div', { class: 'small muted' }, h('code', null, x.id.slice(0, 8) + '…'))),
       x.revoked ? badge('revocado', 'err') : badge('autorizado', 'ok'), since(x.last_seen_at),
@@ -861,8 +916,9 @@
         h('button', { class: 'btn sm danger', onclick: async () => { if (!(await confirmBox('Revocar equipo', `"${x.name}" dejará de sincronizar hasta que se vuelva a vincular. ¿Revocar?`))) return; if (await safe(() => superCall('revokeDevice', { school_id: s.id, device_id: x.id }))) { toast('Equipo revocado', 'ok'); render(); } } }, 'Revocar'))]);
     const invRows = d.invitations.slice(0, 30).map((i) => [i.child_name, h('code', null, i.code), badge(i.status, i.status === 'usado' ? 'ok' : (i.status === 'vencido' ? 'err' : 'warn')), i.used_by_name || '—', fmtDate(i.expires_at)]);
     put(main,
-      h('div', { class: 'row pagehead' }, h('button', { class: 'btn', onclick: () => go('instituciones') }, '← Instituciones'), h('h1', { style: { margin: 0 }, class: 'grow' }, s.name), schoolBadge(s.status)),
-      h('div', { class: 'row', style: { marginBottom: '14px' } }, h('button', { class: 'btn', onclick: edit }, 'Editar datos y plan'),
+      h('div', { style: { marginBottom: '10px' } }, h('button', { class: 'btn ghost', onclick: () => go('instituciones') }, '← Volver a escuelas')),
+      pageHead(s.name, [s.contact_name, s.contact_phone, s.contact_email].filter(Boolean).join(' · ') || 'Datos de la escuela', schoolBadge(s.status)),
+      h('div', { class: 'row', style: { marginBottom: '18px', flexWrap: 'wrap' } }, h('button', { class: 'btn', onclick: edit }, '✏️ Editar datos y plan'), h('button', { class: 'btn', onclick: () => go('seguridad') }, '🛡️ Seguridad de esta escuela'),
         s.status !== 'activa' ? h('button', { class: 'btn ok', onclick: () => setStatus('activa') }, 'Activar') : null,
         s.status !== 'prueba' ? h('button', { class: 'btn', onclick: () => setStatus('prueba') }, 'Pasar a prueba') : null,
         s.status !== 'suspendida' ? h('button', { class: 'btn danger', onclick: () => setStatus('suspendida') }, 'Suspender') : null),
@@ -924,7 +980,7 @@
     const tab = params.tab || 'leer';
     const tabs = h('div', { class: 'tabs' }, [['leer', '1. Leer tarjetas'], ['asignar', '2. Asignar a alumnos'], ['codigos', '3. Hoja de códigos para padres']]
       .map(([k, l]) => h('button', { class: 'btn' + (k === tab ? ' active' : ''), onclick: () => go('programar', { tab: k }) }, l)));
-    put(main, h('h1', null, 'Programar tarjetas'), tabs);
+    put(main, pageHead('Programar tarjetas', 'Tres pasos: leer las tarjetas nuevas, asignarlas a los alumnos e imprimir los códigos para los padres.'), tabs);
     const body = h('div'); main.appendChild(body);
     if (tab === 'leer') {
       const cards = await call('listCards');
@@ -1029,23 +1085,271 @@
     }
   };
 
+  // ======================================================================
+  // ----- Superadministrador: Cuentas -----
+  // ======================================================================
+  const ROLE_ORDER_LABEL = { superadmin: 'Superadministrador', admin: 'Administrador de escuela', cajero: 'Cajero', tutor: 'Padre / tutor' };
+  function accountState(u) {
+    if (!u.active) return badge('desactivada', 'err');
+    if (u.locked) return badge('bloqueada por intentos', 'warn');
+    return badge('activa', 'ok');
+  }
+  function setPasswordModal(u) {
+    const own = h('input', { type: 'text', placeholder: 'Déjelo vacío para generar una automática', autocomplete: 'off' });
+    modal('Asignar contraseña nueva', h('div', { class: 'form' },
+      h('p', null, 'Cuenta: ', h('b', null, u.full_name), ` (${u.username})`),
+      h('p', { class: 'small muted' }, 'Las contraseñas están cifradas y nadie puede verlas, ni siquiera usted. Aquí puede asignar una nueva: la persona deberá usarla para entrar y se cerrarán sus sesiones abiertas.'),
+      field('Contraseña nueva (opcional)', own, 'Mínimo 8 caracteres. Si la deja vacía se crea una segura de 12 caracteres.')),
+    [{ label: 'Cancelar' }, { label: 'Asignar contraseña', class: 'primary', onClick: async () => {
+      try { const r = await superCall('setPassword', { user_id: u.id, password: own.value.trim() || undefined }); passShownModal('Contraseña asignada', r.user, r.password); } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+  }
+  VIEWS.cuentas = async (main) => {
+    const o = await superCall('overview');
+    const q = h('input', { placeholder: 'Nombre, usuario, correo o teléfono' });
+    const role = h('select', null, h('option', { value: '' }, 'Todas'), ['superadmin', 'admin', 'cajero', 'tutor'].map((r) => h('option', { value: r }, ROLE_ORDER_LABEL[r])));
+    const school = h('select', null, h('option', { value: '' }, 'Todas'), o.schools.map((s) => h('option', { value: s.id }, s.name)));
+    const status = h('select', null, h('option', { value: '' }, 'Todas'), h('option', { value: 'activas' }, 'Activas'), h('option', { value: 'bloqueadas' }, 'Desactivadas o bloqueadas'));
+    const box = h('div', { class: 'card tablewrap' });
+    const load = async () => {
+      const list = await superCall('listAccounts', { q: q.value.trim() || undefined, role: role.value || undefined, school_id: school.value || undefined, status: status.value || undefined });
+      box.innerHTML = '';
+      box.appendChild(h('div', { class: 'small muted', style: { marginBottom: '8px' } }, `${list.length} cuenta(s)`));
+      if (!list.length) { box.appendChild(h('div', { class: 'empty' }, 'No hay cuentas con ese filtro')); return; }
+      box.appendChild(respTable([{ label: 'Persona' }, { label: 'Jerarquía' }, { label: 'Escuela' }, { label: 'Estado' }, { label: 'Último acceso' }, { label: 'Creada' }, { label: '', right: true }],
+        list.map((u) => [
+          h('div', null, h('b', null, u.full_name), h('div', { class: 'small muted' }, u.username, u.email ? ' · ' + u.email : '', u.phone ? ' · ' + u.phone : '')),
+          h('span', null, ROLE_ORDER_LABEL[u.role] || u.role),
+          (u.school_name && u.school_name.replace(/,(?! )/g, ', ')) || h('span', { class: 'muted' }, u.role === 'superadmin' ? 'Toda la plataforma' : '—'),
+          accountState(u),
+          h('span', { title: u.last_login_ip || '' }, since(u.last_login_at)),
+          fmtDate(u.created_at),
+          h('div', { class: 'row', style: { justifyContent: 'flex-end', gap: '6px' } },
+            u.role === 'superadmin' ? h('span', { class: 'small muted' }, 'Protegida') : [
+              h('button', { class: 'btn sm', onclick: () => setPasswordModal(u) }, '🔑 Contraseña'),
+              u.locked ? h('button', { class: 'btn sm', onclick: async () => { if (await safe(() => superCall('unlockAccount', { user_id: u.id }))) { toast('Cuenta desbloqueada', 'ok'); load(); } } }, 'Desbloquear') : null,
+              h('button', { class: 'btn sm ' + (u.active ? 'danger' : 'ok'), onclick: async () => {
+                if (u.active && !(await confirmBox('Desactivar cuenta', `${u.full_name} ya no podrá entrar y se cerrarán sus sesiones. Puede reactivarla cuando quiera. ¿Desactivar?`))) return;
+                if (await safe(() => superCall('setAccountActive', { user_id: u.id, active: !u.active }))) { toast(u.active ? 'Cuenta desactivada' : 'Cuenta activada', 'ok'); load(); }
+              } }, u.active ? 'Desactivar' : 'Activar'),
+            ]),
+        ])));
+    };
+    let t; q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 300); });
+    [role, school, status].forEach((x) => x.addEventListener('change', load));
+    put(main, pageHead('Cuentas', 'Todas las personas que pueden entrar al sistema, de todas las escuelas. Solo usted puede cambiar contraseñas.'),
+      banner('info', '🔑', 'Por seguridad las contraseñas se guardan cifradas y no se pueden ver. Use ', h('b', null, '“Contraseña”'), ' para asignar una nueva: se mostrará una sola vez para que la copie y se la entregue a la persona.'),
+      h('div', { class: 'card filters' }, field('Buscar', q), field('Jerarquía', role), field('Escuela', school), field('Estado', status)), box);
+    await load();
+  };
+
+  // ======================================================================
+  // ----- Superadministrador: Seguridad y emergencia -----
+  // ======================================================================
+  const pesos = (c) => (c ? (c / 100).toFixed(0) : '');
+  const toCents = (v) => { const s = String(v || '').replace(/[$,\s]/g, ''); if (!s) return null; const n = Math.round(Number(s) * 100); if (!Number.isFinite(n) || n <= 0) throw new Error('Monto inválido'); return n; };
+  function switchRow(title, desc, on, onToggle, danger) {
+    const b = h('button', { class: 'btn ' + (on ? 'ok' : (danger ? 'warn' : '')), onclick: onToggle }, on ? 'Quitar' : 'Activar');
+    return h('div', { class: 'switchrow' }, h('div', { class: 'grow' }, h('b', null, title), h('div', { class: 'small muted' }, desc)),
+      h('span', { class: on ? 'state-on' : 'state-off' }, on ? 'ACTIVO' : 'Apagado'), b);
+  }
+  function lockdownModal() {
+    const inp = h('input', { placeholder: 'Escriba: ALERTA ROJA', autocomplete: 'off', style: { fontSize: '1.2rem' } });
+    modal('🚨 Activar ALERTA ROJA', h('div', { class: 'form' },
+      banner('red', '🚨', h('b', null, 'Esto detiene todo el sistema de inmediato:'),
+        h('ul', null, h('li', null, 'Todas las escuelas quedan en SOLO LECTURA (no se puede cobrar, recargar ni modificar nada).'),
+          h('li', null, 'Se cierran las sesiones de todos (directores, cajeros y padres).'),
+          h('li', null, 'Nadie puede entrar excepto usted (superadministrador).'))),
+      h('p', null, 'Úselo si sospecha un robo de contraseñas o recargas falsas. Para confirmar escriba ', h('b', null, 'ALERTA ROJA'), ':'), inp),
+    [{ label: 'Cancelar' }, { label: 'ACTIVAR ALERTA ROJA', class: 'danger', onClick: async () => {
+      if (inp.value.trim().toUpperCase() !== 'ALERTA ROJA') { toast('Escriba exactamente ALERTA ROJA para confirmar', 'err'); return false; }
+      try { const r = await superCall('lockdown', { confirm: inp.value.trim().toUpperCase() }); toast(`Alerta roja activa. Sesiones cerradas: ${r.sessions_closed}`, 'ok'); render(); } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+  }
+  function schoolLimitsModal(s) {
+    const f = s.flags;
+    const lim = h('input', { value: pesos(f.daily_recharge_limit_cents), placeholder: 'Sin límite', inputmode: 'decimal' });
+    const big = h('input', { value: pesos(f.large_recharge_cents), inputmode: 'decimal' });
+    const hs = h('input', { type: 'time', value: f.hours_start }); const he = h('input', { type: 'time', value: f.hours_end });
+    modal('Límites de ' + s.name, h('div', { class: 'form' },
+      field('Límite de recargas por día (pesos, toda la escuela)', lim, 'Al llegar a este total ya no se aceptan más recargas ese día. Vacío = sin límite.'),
+      field('Avisarme si una sola recarga es mayor a (pesos)', big),
+      h('div', { class: 'grid g2' }, field('Horario escolar: desde', hs), field('hasta', he)),
+      h('p', { class: 'small muted' }, 'Las recargas fuera de este horario o en fin de semana generan una alerta (no se bloquean).')),
+    [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
+      try {
+        await superCall('setSchoolSecurity', { school_id: s.id, daily_recharge_limit_cents: lim.value.trim() ? toCents(lim.value) : null, large_recharge_cents: big.value.trim() ? toCents(big.value) : null, hours_start: hs.value || null, hours_end: he.value || null });
+        toast('Límites guardados', 'ok'); render();
+      } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+  }
+  VIEWS.seguridad = async (main) => {
+    const o = await superCall('securityOverview');
+    const set = async (s, k, v, msg) => { if (await safe(() => superCall('setSchoolSecurity', { school_id: s.id, [k]: v }))) { toast(msg, 'ok'); render(); } };
+    const ask = async (title, txt, fn) => { if (await confirmBox(title, txt)) fn(); };
+    const P = o.persistence || {};
+    put(main, pageHead('Seguridad y emergencia', 'Botones para detener problemas rápido. Todo lo que haga aquí queda registrado en la Bitácora.'),
+      o.lockdown ? h('div', { class: 'redzone' }, h('h2', null, '🚨 ALERTA ROJA ACTIVA'),
+        h('p', null, `Desde ${fmtDate(o.lockdown_at)} por ${o.lockdown_by || '—'}. Todo está en solo lectura y solo usted puede entrar.`),
+        h('button', { class: 'btn ok lg', onclick: () => ask('Quitar alerta roja', 'El sistema volverá a funcionar normal y las personas podrán entrar de nuevo (tendrán que iniciar sesión otra vez). ¿Desbloquear?', async () => { if (await safe(() => superCall('unlock'))) { toast('Sistema desbloqueado', 'ok'); render(); } }) }, '🔓 Desbloquear el sistema'))
+        : h('div', { class: 'redzone' }, h('div', { class: 'grow' }, h('h2', null, 'Botón de emergencia'),
+          h('p', null, 'Si cree que alguien robó una contraseña o está haciendo recargas falsas, presione el botón rojo: todo se congela y solo usted puede entrar.')),
+        h('button', { class: 'redbtn', onclick: lockdownModal }, '🚨 ALERTA ROJA')),
+      o.open_alerts ? banner('warn', '🔔', h('b', null, `Hay ${o.open_alerts} alerta(s) sin revisar. `), h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('alertas'); } }, 'Ver alertas')) : null,
+      h('h2', { class: 'section-title' }, 'Toda la plataforma'),
+      h('div', { class: 'card' },
+        switchRow('Congelar TODAS las recargas', 'Ninguna escuela podrá registrar recargas hasta que lo quite. Las ventas siguen funcionando.', o.freeze_recharges_global,
+          () => ask(o.freeze_recharges_global ? 'Reanudar recargas' : 'Congelar recargas', o.freeze_recharges_global ? '¿Permitir de nuevo las recargas en todas las escuelas?' : '¿Congelar las recargas en TODAS las escuelas?', async () => { if (await safe(() => superCall('setGlobalFreeze', { on: !o.freeze_recharges_global }))) { toast('Listo', 'ok'); render(); } }), true),
+        h('div', { class: 'switchrow' }, h('div', { class: 'grow' }, h('b', null, 'Cerrar la sesión de todos'), h('div', { class: 'small muted' }, 'Todas las personas (excepto usted) deberán volver a escribir su contraseña.')),
+          h('button', { class: 'btn warn', onclick: () => ask('Cerrar todas las sesiones', '¿Cerrar la sesión de todas las cuentas de todas las escuelas?', async () => { const r = await safe(() => superCall('logoutEveryone')); if (r) toast(`Sesiones cerradas: ${r.sessions_closed} cuenta(s)`, 'ok'); }) }, 'Cerrar todas')),
+        h('div', { class: 'switchrow' }, h('div', { class: 'grow' }, h('b', null, 'Descargar respaldo'), h('div', { class: 'small muted' }, 'Copia completa de la base de datos (todas las escuelas). Guárdela en un lugar seguro: contiene datos personales.')),
+          h('button', { class: 'btn primary', onclick: async () => {
+            if (!window.coop.downloadBackup) return toast('Disponible solo en la versión web', 'err');
+            const r = await window.coop.downloadBackup(); if (r.ok) toast('Respaldo descargado: ' + r.data.name, 'ok'); else toast(r.error, 'err');
+          } }, '⬇ Descargar respaldo')),
+        h('div', { class: 'switchrow' }, h('div', { class: 'grow' }, h('b', null, 'Dónde se guardan los datos'),
+          h('div', { class: 'small muted' }, P.mode === 'temporal' ? 'TEMPORAL: los datos se borran cuando el servidor se reinicia. Configure Turso o un disco antes de usarlo con una escuela real (ver guía).'
+            : P.mode === 'turso' ? `Copia en Turso (nube). Última copia: ${P.last_ok_at ? since(P.last_ok_at) : 'pendiente'}${P.last_error ? ' · Error: ' + P.last_error : ''}`
+              : P.mode === 'disco' ? 'Disco permanente del servidor, con respaldo diario automático.' : P.mode === 'memoria' ? 'Memoria (modo de prueba).' : (P.mode || '—'))),
+          h('span', { class: P.mode === 'temporal' ? 'state-on' : 'state-off' }, P.mode === 'temporal' ? 'TEMPORAL' : 'OK'))),
+      h('h2', { class: 'section-title' }, 'Por escuela'),
+      o.schools.length ? o.schools.map((s) => {
+        const f = s.flags;
+        return h('div', { class: 'card', style: { marginBottom: '16px' } },
+          h('div', { class: 'row', style: { marginBottom: '6px' } }, h('h2', { class: 'grow', style: { margin: 0 } }, '🏫 ' + s.name), schoolBadge(s.status),
+            s.synced ? badge('usa caja de escritorio', 'info') : null),
+          h('div', { class: 'kv small muted' }, `Recargas de hoy: ${money(s.today_recharges_cents)}`, f.daily_recharge_limit_cents ? ` · Límite diario: ${money(f.daily_recharge_limit_cents)}` : ' · Sin límite diario',
+            ` · Aviso por recarga mayor a ${money(f.large_recharge_cents)} · Horario ${f.hours_start}–${f.hours_end}`),
+          switchRow('Congelar recargas', f.freeze_recharges_global ? 'Ahora están congeladas para TODAS las escuelas (vea arriba).' : 'No se podrán registrar recargas en esta escuela.', !!f.freeze_recharges,
+            () => set(s, 'freeze_recharges', !f.freeze_recharges, f.freeze_recharges ? 'Recargas reanudadas' : 'Recargas congeladas'), true),
+          switchRow('Congelar ventas', 'La caja no podrá cobrar.', f.freeze_sales, () => set(s, 'freeze_sales', !f.freeze_sales, f.freeze_sales ? 'Ventas reanudadas' : 'Ventas congeladas'), true),
+          switchRow('Solo lectura', 'Se puede consultar todo, pero nadie puede cobrar, recargar ni cambiar nada.', f.read_only, () => set(s, 'read_only', !f.read_only, f.read_only ? 'Escuela desbloqueada' : 'Escuela en solo lectura'), true),
+          h('div', { class: 'row', style: { marginTop: '12px', flexWrap: 'wrap', gap: '8px' } },
+            h('button', { class: 'btn', onclick: () => schoolLimitsModal(s) }, '⚙️ Límites y horario'),
+            h('button', { class: 'btn', onclick: () => go('seguridad', { recargas: s.id }) }, '💵 Revisar recargas'),
+            h('button', { class: 'btn warn', onclick: () => ask('Cerrar sesiones', `¿Cerrar la sesión de todo el personal y padres de ${s.name}?`, async () => { const r = await safe(() => superCall('logoutSchool', { school_id: s.id })); if (r) toast(`Sesiones cerradas: ${r.sessions_closed}`, 'ok'); }) }, 'Cerrar sesiones'),
+            h('button', { class: 'btn danger', onclick: () => ask('Bloquear administradores', `Se DESACTIVAN las cuentas de administrador de ${s.name} (${s.admins.map((a) => a.username).join(', ') || 'ninguna'}) y se cierran sus sesiones. Puede reactivarlas en Cuentas. ¿Continuar?`, async () => { const r = await safe(() => superCall('blockSchoolAdmins', { school_id: s.id })); if (r) { toast(`Administradores bloqueados: ${r.blocked}`, 'ok'); render(); } }) }, '⛔ Bloquear administradores')));
+      }) : h('div', { class: 'empty' }, 'Aún no hay escuelas'),
+      h('div', { id: 'recargas-rev' }), h('div', { id: 'papelera' }));
+    await rechargesReview(main.querySelector('#recargas-rev'), o, state.params && state.params.recargas);
+    await trashBox(main.querySelector('#papelera'));
+    if (state.params && state.params.recargas) main.querySelector('#recargas-rev').scrollIntoView();
+  };
+  async function rechargesReview(el, o, sid) {
+    const school = h('select', null, h('option', { value: '' }, 'Todas las escuelas'), o.schools.map((s) => h('option', { value: s.id, selected: String(sid) === String(s.id) }, s.name)));
+    const only = h('input', { type: 'checkbox', checked: true });
+    const box = h('div', { class: 'tablewrap' });
+    const load = async () => {
+      const list = await superCall('listRecharges', { school_id: school.value || undefined, only_flagged: only.checked });
+      box.innerHTML = '';
+      if (!list.length) { box.appendChild(h('div', { class: 'empty' }, only.checked ? 'No hay recargas sospechosas 👍' : 'Sin recargas')); return; }
+      box.appendChild(respTable([{ label: 'Fecha' }, { label: 'Escuela' }, { label: 'Alumno / tarjeta' }, { label: 'Monto', right: true }, { label: 'Hecha por' }, { label: 'Motivo' }, { label: '', right: true }],
+        list.map((t) => [fmtDate(t.created_at), t.school_name || '—', h('div', null, t.child_name || '—', h('div', { class: 'small muted' }, t.card_uid || '')), money(t.amount_cents), t.operator || '—',
+          h('div', null, t.status === 'revertida' ? badge('revertida', 'err') : null, t.flag ? badge('marcada', 'warn') : null, t.alert_kinds ? h('div', { class: 'small muted' }, t.alert_kinds.split(',').map((k) => ALERT_LABEL[k] || k).join(', ')) : null, t.flag_note ? h('div', { class: 'small' }, t.flag_note) : null),
+          t.status === 'revertida' ? '' : h('div', { class: 'row', style: { justifyContent: 'flex-end', gap: '6px' } },
+            t.flag ? null : h('button', { class: 'btn sm', onclick: async () => { if (await safe(() => superCall('flagRecharge', { tx_id: t.id, note: 'Revisar' }))) { toast('Recarga marcada', 'ok'); load(); } } }, 'Marcar'),
+            h('button', { class: 'btn sm danger', onclick: async () => {
+              if (!(await confirmBox('Revertir recarga', `Se quitarán ${money(t.amount_cents)} del saldo de ${t.child_name || 'la tarjeta'}. Si la escuela usa caja de escritorio, se bloqueará la tarjeta para que la escuela haga el ajuste. ¿Continuar?`))) return;
+              const r = await safe(() => superCall('reverseRecharge', { tx_id: t.id, reason: 'Recarga sospechosa' }));
+              if (r) { toast(r.reversed ? 'Recarga revertida' : r.message, r.reversed ? 'ok' : 'warn'); load(); }
+            } }, 'Revertir'))])));
+    };
+    school.addEventListener('change', load); only.addEventListener('change', load);
+    el.appendChild(h('h2', { class: 'section-title' }, 'Revisar recargas'));
+    el.appendChild(h('div', { class: 'card' }, h('div', { class: 'filters', style: { boxShadow: 'none', padding: 0, border: 0 } }, field('Escuela', school), h('label', { class: 'check' }, only, 'Solo sospechosas o marcadas')), box));
+    await load();
+  }
+  async function trashBox(el) {
+    const list = await superCall('listTrash');
+    el.appendChild(h('h2', { class: 'section-title' }, 'Papelera (productos borrados)'));
+    el.appendChild(h('div', { class: 'card tablewrap' }, list.length ? respTable([{ label: 'Producto' }, { label: 'Escuela' }, { label: 'Precio', right: true }, { label: 'Borrado' }, { label: '', right: true }],
+      list.map((p) => [p.name, p.school_name || '—', money(p.price_cents), fmtDate(p.deleted_at),
+        h('button', { class: 'btn sm ok', onclick: async () => { if (await safe(() => superCall('restoreProduct', { id: p.id }))) { toast('Producto restaurado', 'ok'); render(); } } }, 'Restaurar')]))
+      : h('div', { class: 'empty' }, 'La papelera está vacía')));
+  }
+
+  // ======================================================================
+  // ----- Superadministrador: Alertas -----
+  // ======================================================================
+  const ALERT_LABEL = { recarga_grande: 'Recarga grande', muchas_recargas: 'Muchas recargas seguidas del mismo usuario', recargas_repetidas: 'Varias recargas a la misma tarjeta',
+    fuera_de_horario: 'Recarga fuera de horario', auto_recarga: 'Posible auto-recarga (padre/alumno)', limite_diario: 'Límite diario superado', borrado: 'Borrado',
+    intentos_fallidos: 'Intentos de acceso fallidos', cuenta_bloqueada: 'Cuenta bloqueada por intentos', alerta_roja: 'Alerta roja', superadmin_recuperado: 'Recuperación de superadmin' };
+  const SEV_LABEL = { critica: 'Crítica', alta: 'Alta', media: 'Media', aviso: 'Aviso', info: 'Info', baja: 'Baja' };
+  const sevBadge = (s) => h('span', { class: 'badge ' + (s || 'info') }, SEV_LABEL[s] || s || 'Info');
+  VIEWS.alertas = async (main) => {
+    const all = h('select', null, h('option', { value: '' }, 'Sin revisar'), h('option', { value: 'todas' }, 'Todas'));
+    const box = h('div');
+    const load = async () => {
+      const list = await superCall('listAlerts', { status: all.value || undefined });
+      box.innerHTML = '';
+      if (!list.length) { box.appendChild(h('div', { class: 'card empty' }, all.value ? 'No hay alertas' : 'No hay alertas pendientes 👍')); return; }
+      list.forEach((a) => box.appendChild(h('div', { class: 'alert-item sev-' + (a.severity || 'media') + (a.ack_at ? ' done' : '') },
+        h('div', { class: 'grow' }, h('div', { class: 'row', style: { gap: '8px' } }, sevBadge(a.severity), h('b', null, ALERT_LABEL[a.kind] || a.kind), a.school_name ? h('span', { class: 'muted' }, '· ' + a.school_name) : null),
+          h('div', { style: { margin: '6px 0' } }, a.message),
+          h('div', { class: 'small muted' }, fmtDate(a.created_at), a.ack_at ? ` · Revisada por ${a.ack_by} (${fmtDate(a.ack_at)})` : '')),
+        h('div', { class: 'row', style: { gap: '6px' } },
+          a.ref_type === 'transaction' ? h('button', { class: 'btn sm', onclick: () => go('seguridad', { recargas: a.school_id || '' }) }, 'Ver recarga') : null,
+          a.ack_at ? null : h('button', { class: 'btn sm ok', onclick: async () => { if (await safe(() => superCall('ackAlert', { id: a.id }))) { load(); refreshAlertCount(); } } }, '✔ Revisada')))));
+    };
+    all.addEventListener('change', load);
+    put(main, pageHead('Alertas', 'Avisos automáticos de cosas raras: recargas grandes o muy seguidas, fuera de horario, borrados e intentos de acceso fallidos.',
+      h('button', { class: 'btn', onclick: async () => { if (!(await confirmBox('Marcar todas', '¿Marcar todas las alertas como revisadas?'))) return; if (await safe(() => superCall('ackAlert', { id: 0 }))) { load(); refreshAlertCount(); } } }, '✔ Marcar todas como revisadas')),
+      h('div', { class: 'card filters' }, field('Mostrar', all)), box);
+    await load();
+  };
+
+  // ======================================================================
+  // ----- Superadministrador: Bitácora -----
+  // ======================================================================
+  const ACTION_LABEL = { recarga: 'Recarga', recarga_caja: 'Recarga (caja)', ajuste: 'Ajuste de saldo', recarga_revertida: 'Recarga revertida', recarga_marcada: 'Recarga marcada',
+    producto_borrado: 'Producto borrado', producto_restaurado: 'Producto restaurado', contrasena_asignada: 'Contraseña asignada', contrasena_propia: 'Cambió su contraseña', superadmin_recuperado: 'Recuperación de superadmin',
+    rol_cambiado: 'Cambio de rol', cuenta_activada: 'Cuenta activada', cuenta_desactivada: 'Cuenta desactivada', usuario_creado: 'Cuenta creada', usuario_editado: 'Cuenta editada', cuenta_desbloqueada: 'Cuenta desbloqueada',
+    login: 'Inicio de sesión', login_fallido: 'Contraseña incorrecta', cuenta_bloqueada_intentos: 'Bloqueo por intentos', login_rechazado_bloqueo: 'Acceso rechazado (bloqueo)',
+    alerta_roja: 'ALERTA ROJA', alerta_roja_fin: 'Fin de alerta roja', congelar_recargas: 'Congelar recargas', congelar_ventas: 'Congelar ventas', solo_lectura: 'Solo lectura', cerrar_sesiones: 'Cerrar sesiones',
+    bloquear_admin: 'Bloquear administradores', limites_escuela: 'Límites de escuela', respaldo_descargado: 'Respaldo descargado' };
+  const detailsText = (d) => (!d ? '' : typeof d === 'string' ? d : Object.entries(d).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : (k === 'monto' ? money(v) : v)}`).join(' · '));
+  VIEWS.bitacora = async (main) => {
+    const o = await superCall('overview');
+    const from = h('input', { type: 'date' }); const to = h('input', { type: 'date' }); const q = h('input', { placeholder: 'Persona, IP, tarjeta…' });
+    const cat = h('select', null, h('option', { value: '' }, 'Todo'), [['recargas', 'Recargas'], ['borrados', 'Borrados'], ['contrasenas', 'Contraseñas'], ['roles', 'Cuentas y roles'], ['accesos', 'Accesos'], ['emergencia', 'Emergencia']].map(([v, l]) => h('option', { value: v }, l)));
+    const school = h('select', null, h('option', { value: '' }, 'Todas'), o.schools.map((s) => h('option', { value: s.id }, s.name)));
+    const box = h('div', { class: 'card tablewrap' });
+    const load = async () => {
+      const list = await superCall('listAudit', { from: from.value || undefined, to: to.value || undefined, category: cat.value || undefined, school_id: school.value || undefined, q: q.value.trim() || undefined, limit: 500 });
+      box.innerHTML = '';
+      box.appendChild(h('div', { class: 'small muted', style: { marginBottom: '8px' } }, `${list.length} registro(s)${list.length >= 500 ? ' (se muestran los 500 más recientes)' : ''}`));
+      if (!list.length) { box.appendChild(h('div', { class: 'empty' }, 'Sin registros con ese filtro')); return; }
+      box.appendChild(respTable([{ label: 'Fecha y hora' }, { label: 'Quién' }, { label: 'Qué hizo' }, { label: 'Escuela' }, { label: 'Detalles' }, { label: 'IP' }],
+        list.map((a) => [fmtDate(a.created_at), h('div', null, a.actor_name || '—', a.actor_role ? h('div', { class: 'small muted' }, ROLE_LABEL[a.actor_role] || a.actor_role) : null),
+          h('div', null, h('b', null, ACTION_LABEL[a.action] || a.action), ' ', ['critica', 'alta'].includes(a.severity) ? sevBadge(a.severity) : null),
+          a.school_name || '—', h('span', { class: 'small' }, detailsText(a.details)), h('span', { class: 'small muted' }, a.ip || '—')])));
+    };
+    put(main, pageHead('Bitácora', 'Registro de todo lo importante: quién lo hizo, cuándo, desde qué IP y qué cambió. No se puede borrar.'),
+      h('div', { class: 'card filters' }, field('Desde', from), field('Hasta', to), field('Tipo', cat), field('Escuela', school), field('Buscar', q), h('button', { class: 'btn primary', onclick: load }, 'Buscar')), box);
+    await load();
+  };
+
   // ----- Ajustes / Mi cuenta -----
   VIEWS.ajustes = async (main) => {
     const info = await window.coop.info();
-    const cur = h('input', { type: 'password' }); const n1 = h('input', { type: 'password' }); const n2 = h('input', { type: 'password' });
+    const me = state.user; const isSuper = me.role === 'superadmin';
+    const cur = h('input', { type: 'password', autocomplete: 'current-password' }); const n1 = h('input', { type: 'password', autocomplete: 'new-password' }); const n2 = h('input', { type: 'password', autocomplete: 'new-password' });
     const change = async () => {
       if (n1.value !== n2.value) return toast('Las contraseñas nuevas no coinciden', 'err');
       const r = await safe(() => call('changePassword', { current: cur.value, next: n1.value }));
       if (r) { toast('Contraseña actualizada', 'ok'); cur.value = n1.value = n2.value = ''; }
     };
-    put(main, h('h1', null, state.user.role === 'admin' ? 'Ajustes' : 'Mi cuenta'),
-      state.user.role === 'superadmin' ? h('p', { class: 'muted' }, 'Cuenta del dueño de la plataforma (Zuki Company). Use una contraseña larga y no la comparta con las escuelas.') : null,
+    put(main, pageHead(me.role === 'admin' ? 'Ajustes' : 'Mi cuenta', isSuper ? 'Cuenta del dueño de la plataforma (Zuki Company).' : 'Sus datos y opciones de la cuenta.'),
       h('div', { class: 'grid g2' },
-        h('div', { class: 'card form' }, h('h2', null, 'Cambiar contraseña'), field('Contraseña actual', cur), field('Nueva contraseña (mín. 6)', n1), field('Repetir nueva contraseña', n2), h('div', null, h('button', { class: 'btn primary', onclick: change }, 'Actualizar'))),
-        WEB ? h('div', { class: 'card form' }, h('h2', null, 'Sesiones'), h('p', { class: 'small muted' }, 'Las sesiones expiran solas tras 30 días sin uso. Si perdió un dispositivo, cierre todas.'),
-          h('div', null, h('button', { class: 'btn danger', onclick: async () => { await window.coop.auth.logoutAll(); state.user = null; render(); } }, 'Cerrar sesión en todos los dispositivos'))) : null,
-        !WEB && state.user.role === 'admin' ? serverConfigCard() : null,
-        !WEB && state.user.role === 'admin' ? h('div', { class: 'card form' }, h('h2', null, 'Base de datos y respaldos'),
+        h('div', { class: 'card' }, h('h2', null, 'Mis datos'), h('div', { class: 'kv' },
+          h('div', null, h('span', { class: 'muted' }, 'Nombre: '), h('b', null, me.full_name)), h('div', null, h('span', { class: 'muted' }, 'Usuario: '), h('b', null, me.username)),
+          h('div', null, h('span', { class: 'muted' }, 'Puesto: '), h('b', null, ROLE_LABEL[me.role])), me.email ? h('div', null, h('span', { class: 'muted' }, 'Correo: '), me.email) : null)),
+        isSuper ? h('div', { class: 'card form' }, h('h2', null, 'Cambiar mi contraseña'), field('Contraseña actual', cur), field('Contraseña nueva', n1, 'Mínimo 10 caracteres. No la comparta con las escuelas.'), field('Repita la contraseña nueva', n2), h('div', null, h('button', { class: 'btn primary', onclick: change }, 'Guardar contraseña')))
+          : h('div', { class: 'card' }, h('h2', null, 'Contraseña'), banner('info', '🔑', 'Por seguridad, las contraseñas solo las cambia el administrador de la plataforma. Si olvidó la suya o cree que alguien más la conoce, pídale una nueva.')),
+        WEB ? h('div', { class: 'card form' }, h('h2', null, 'Sesiones'), h('p', { class: 'small muted' }, 'Las sesiones se cierran solas tras 30 días sin uso. Si perdió su celular o computadora, cierre todas.'),
+          h('div', null, h('button', { class: 'btn danger', onclick: async () => { await window.coop.auth.logoutAll(); state.user = null; render(); } }, 'Cerrar sesión en todos mis dispositivos'))) : null,
+        !WEB && me.role === 'admin' ? serverConfigCard() : null,
+        !WEB && me.role === 'admin' ? h('div', { class: 'card form' }, h('h2', null, 'Respaldos'),
           h('p', { class: 'small muted' }, 'Toda la información se guarda en este equipo:'), h('code', { class: 'small' }, info.dbPath),
           h('p', { class: 'small muted' }, 'Haga un respaldo al menos una vez al día y guárdelo en una USB o en la nube. Para restaurar, cierre la app y reemplace el archivo anterior por el respaldo (renombrándolo a cooperativa.db).'),
           h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: async () => { const r = await window.coop.backup(); if (r.ok) toast('Respaldo guardado en ' + r.data, 'ok'); else if (r.error !== 'Cancelado') toast(r.error, 'err'); } }, 'Crear respaldo…'),

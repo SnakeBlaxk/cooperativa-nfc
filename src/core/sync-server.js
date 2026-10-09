@@ -17,6 +17,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex'
 const isUuid = (u) => typeof u === 'string' && /^[0-9a-f]{32}$/.test(u);
 
 function createSyncServer(db, opts = {}) {
+  const hooks = { onRecharge: opts.onRecharge || null };
   const ts = () => fmtLocal(new Date());
   const primaryOf = (sid) => { const r = db.get('SELECT primary_device_id AS p FROM schools WHERE id = ?', [sid]); return r ? r.p : null; };
   const setPrimaryOf = (sid, dev) => db.run('UPDATE schools SET primary_device_id = ? WHERE id = ?', [dev, sid]);
@@ -101,6 +102,7 @@ function createSyncServer(db, opts = {}) {
     const guard = (table, uuid) => { if (!isUuid(uuid)) throw new AppError('UUID inválido', 'VALIDACION'); if (takenElsewhere(table, uuid, sid)) throw new AppError('Identificador usado por otra escuela', 'CONFLICTO'); };
     const need = (table, uuid, what) => { const id = idBy(table, uuid, sid); if (!id) throw new AppError(`Referencia faltante (${what} ${uuid})`, 'REFERENCIA_FALTANTE'); return id; };
     const t0 = ts();
+    const newRecharges = [];
     db.transaction(() => {
       if (!primary) setPrimaryOf(sid, device.id);
       for (const c of e.categories || []) {
@@ -115,8 +117,9 @@ function createSyncServer(db, opts = {}) {
         guard('products', p.uuid);
         const cat = need('categories', p.category_uuid, 'categoría');
         const id = idBy('products', p.uuid, sid);
-        if (id) db.run('UPDATE products SET name=?, category_id=?, price_cents=?, active=? WHERE id=?', [p.name, cat, p.price_cents, p.active ? 1 : 0, id]);
-        else db.run('INSERT INTO products (uuid, school_id, name, category_id, price_cents, active, created_at) VALUES (?,?,?,?,?,?,?)', [p.uuid, sid, p.name, cat, p.price_cents, p.active ? 1 : 0, p.created_at || t0]);
+        const del = p.deleted_at ? String(p.deleted_at).slice(0, 19) : null;
+        if (id) db.run('UPDATE products SET name=?, category_id=?, price_cents=?, active=?, deleted_at=? WHERE id=?', [p.name, cat, p.price_cents, p.active ? 1 : 0, del, id]);
+        else db.run('INSERT INTO products (uuid, school_id, name, category_id, price_cents, active, created_at, deleted_at) VALUES (?,?,?,?,?,?,?,?)', [p.uuid, sid, p.name, cat, p.price_cents, p.active ? 1 : 0, p.created_at || t0, del]);
         stats.products++;
       }
       for (const c of e.children || []) {
@@ -185,8 +188,11 @@ function createSyncServer(db, opts = {}) {
             [r.lastId, idBy('products', it.product_uuid, sid), it.product_name, it.category_name, it.qty, it.unit_price_cents, it.subtotal_cents]);
         }
         stats.transactions++;
+        if (t.type === 'recarga' && t.status === 'aprobado') newRecharges.push(r.lastId);
       }
     });
+    // Revisión de anomalías de las recargas hechas en la caja (alertas para el superadministrador)
+    if (hooks.onRecharge) for (const id of newRecharges) { try { hooks.onRecharge(id); } catch (err) { console.error('[sync] revisión de recarga:', err.message); } }
     return { ok: true, stats, server_time: t0 };
   }
 
@@ -227,7 +233,7 @@ function createSyncServer(db, opts = {}) {
     return { cursor: max, changes };
   }
 
-  return { registerDevice, authDevice, listDevices, revokeDevice, setPrimary, isSynced, push, pull, recordChange, recordChild, recordCard };
+  return { registerDevice, authDevice, listDevices, revokeDevice, setPrimary, isSynced, push, pull, recordChange, recordChild, recordCard, hooks };
 }
 
 module.exports = { createSyncServer };

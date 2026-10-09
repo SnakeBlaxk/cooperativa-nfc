@@ -94,7 +94,7 @@ function seedMinimal(db, { username = 'admin', password = 'admin123', schoolName
   const bcrypt = require('bcryptjs');
   db.transaction(() => {
     const sid = ensureDefaultSchool(db, schoolName);
-    db.run("INSERT INTO users (username,password_hash,role,full_name,must_change_password,school_id,created_at) VALUES (?,?,'admin','Administrador',1,?,datetime('now','localtime'))", [username, bcrypt.hashSync(password, 10), sid]);
+    db.run("INSERT INTO users (username,password_hash,role,full_name,must_change_password,school_id,created_at) VALUES (?,?,'admin','Administrador',0,?,datetime('now','localtime'))", [username, bcrypt.hashSync(password, 10), sid]);
     for (const n of DEFAULT_CATEGORIES) db.run('INSERT INTO categories (school_id, name) VALUES (?, ?)', [sid, n]);
   });
   return true;

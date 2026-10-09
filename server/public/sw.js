@@ -1,5 +1,5 @@
 // Service worker: guarda la interfaz para que abra rápido; los datos (API) siempre van a la red.
-const CACHE = 'coop-v2';
+const CACHE = 'coop-v3';
 const SHELL = ['/', '/index.html', '/styles.css', '/web.css', '/app.js', '/coop-web.js', '/manifest.webmanifest', '/icon-192.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });

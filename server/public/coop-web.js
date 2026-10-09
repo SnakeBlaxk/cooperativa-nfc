@@ -74,6 +74,20 @@
     onNfcStatus: (cb) => { listeners.status.add(cb); return () => listeners.status.delete(cb); },
     startWebNfc,
     backup: async () => ({ ok: false, error: 'Los respaldos del servidor se hacen en el servidor (ver README)' }),
+    // Descarga del respaldo completo de la base (solo superadministrador)
+    downloadBackup: async () => {
+      if (!access) await refresh();
+      const get = () => fetch('/api/super-backup', { headers: { Authorization: 'Bearer ' + access } });
+      let r;
+      try { r = await get(); if (r.status === 401 && await refresh()) r = await get(); } catch (_) { return { ok: false, error: 'Sin conexión con el servidor' }; }
+      if (!r.ok) { try { return await r.json(); } catch (_) { return { ok: false, error: 'No se pudo descargar (' + r.status + ')' }; } }
+      const blob = await r.blob();
+      const m = /filename="?([^";]+)"?/.exec(r.headers.get('Content-Disposition') || '');
+      const name = m ? m[1] : 'respaldo-cooperativa.db';
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      return { ok: true, data: { name, bytes: blob.size } };
+    },
     openDataFolder: async () => ({ ok: false }),
     auth: {
       forgot: (identifier) => req('/api/auth/forgot', { identifier }),

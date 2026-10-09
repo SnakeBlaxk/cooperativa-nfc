@@ -9,6 +9,8 @@ const { seed, seedMinimal, isEmpty, ensureDefaultSchool } = require('../core/see
 const { startNfcReader } = require('./nfc');
 const { remoteLogin, testServer } = require('./remote-auth');
 const { createSyncClient } = require('../core/sync-client');
+const { evaluateFlags } = require('../core/security');
+const crypto = require('crypto');
 let syncClient = null; let syncTimer = null; let kickTimer = null;
 const SYNC_INTERVAL_MS = Number(process.env.COOP_SYNC_INTERVAL_MS || 45000);
 
@@ -36,7 +38,17 @@ async function init() {
         message: '¿Cómo quiere empezar?', detail: 'Demostración: incluye usuarios, alumnos, tarjetas, productos y movimientos de ejemplo (admin/admin123).\nBase vacía: solo el usuario admin / admin123, que deberá cambiar la contraseña al entrar.' });
       demo = r === 0;
     }
-    if (demo) seed(db); else seedMinimal(db);
+    if (demo) seed(db);
+    else {
+      // Base vacía: contraseña aleatoria para "admin" (solo el administrador de la plataforma cambia contraseñas)
+      const A = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const b = crypto.randomBytes(12);
+      let pass = ''; for (const x of b) pass += A[x % A.length];
+      seedMinimal(db, { password: pass });
+      if (!process.env.COOP_DB_PATH && !process.env.COOP_SMOKE_TEST) {
+        dialog.showMessageBoxSync({ type: 'info', title: 'Anote su contraseña', buttons: ['Ya la anoté'], message: `Usuario: admin\nContraseña: ${pass}`,
+          detail: 'Anótela en un lugar seguro: se muestra solo esta vez. Para cambiarla, vincule la caja al servidor y pida al administrador de la plataforma una nueva.' });
+      }
+    }
     console.log('[db] Base nueva creada', demo ? 'con datos demo' : 'vacía', 'en', file);
   } else console.log('[db] Base cargada de', file);
   // La caja trabaja con UNA escuela (la de su base local; al vincularla toma el nombre de la escuela del servidor)
@@ -48,7 +60,8 @@ async function init() {
   setTimeout(() => { const c = readConfig(); if (c.serverUrl && c.deviceToken) syncClient.syncNow(); }, 3000);
   // Tras cada cambio local se programa una sincronización rápida (3 s) para que el saldo en el servidor se actualice pronto
   const kick = () => { clearTimeout(kickTimer); kickTimer = setTimeout(() => { const c = readConfig(); if (c.serverUrl && c.deviceToken) syncClient.syncNow(); }, 3000); };
-  const READ_ONLY = /^(list|get|lookup|childSummary|dashboard|me$|login$|logout$)/;
+  const READ_ONLY = /^(list|get|lookup|childSummary|dashboard|securityStatus$|me$|login$|logout$)/;
+  const readSecurityFlags = () => { try { const r = db.get("SELECT value FROM meta WHERE key = 'server_security'"); return r ? JSON.parse(r.value) : null; } catch (_) { return null; } };
 
   ipcMain.handle('api', async (event, method, args) => {
     const id = event.sender.id;
@@ -64,6 +77,15 @@ async function init() {
       if (local.ok && r.status === 'ok') session.remote = r.tokens; // reservado para la futura sincronización
       if (local.ok && r.status === 'offline') local.data = { ...local.data, offline: true };
       return local;
+    }
+    // Banderas de seguridad recibidas del servidor (congelar recargas/ventas, solo lectura, ALERTA ROJA)
+    const flags = cfg.deviceToken ? readSecurityFlags() : null;
+    if (method === 'securityStatus') return { ok: true, data: flags || {} };
+    if (flags && session.user && !READ_ONLY.test(String(method))) {
+      const today = new Date(); const d0 = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')} 00:00:00`;
+      const todayRechargesCents = method === 'recharge' ? db.get("SELECT COALESCE(SUM(amount_cents),0) AS s FROM transactions WHERE type = 'recarga' AND status = 'aprobado' AND created_at >= ?", [d0]).s : 0;
+      const msg = evaluateFlags(flags, String(method), args || {}, { todayRechargesCents });
+      if (msg) return { ok: false, error: msg, code: 'BLOQUEADO_SEGURIDAD' };
     }
     const out = api.handle(session, String(method), args);
     if (out.ok && !READ_ONLY.test(String(method))) kick();
@@ -83,6 +105,7 @@ async function init() {
   ipcMain.handle('sync:unlink', (event) => {
     if (!isAdmin(event)) return { ok: false, error: 'Solo el administrador' };
     const c = readConfig(); delete c.deviceToken; writeConfig(c);
+    db.run("DELETE FROM meta WHERE key = 'server_security'");
     return { ok: true, data: syncClient.getStatus() };
   });
   ipcMain.handle('sync:makePrimary', async (event, a) => {

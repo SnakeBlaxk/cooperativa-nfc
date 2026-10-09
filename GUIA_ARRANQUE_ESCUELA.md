@@ -20,11 +20,11 @@ Está pensada para alguien **sin conocimientos técnicos**. Si algún paso le re
 
 > Esto lo hace Zuki Company **una vez**. Después solo se agregan escuelas desde una pantalla.
 
-Necesita (costo aproximado 7 a 10 USD al mes): una cuenta en un servicio de hospedaje que mantenga el programa encendido y guarde los datos en un **disco permanente**. Recomendamos **Render** (render.com) o **Railway** (railway.app). *Netlify o Vercel no sirven para esto.*
+Necesita una cuenta en un servicio de hospedaje que mantenga el programa encendido y **guarde los datos de forma permanente**. Recomendamos **Render** (render.com). *Netlify o Vercel no sirven para esto.* Vea abajo **“Guardar los datos”**: sin ese paso, el servidor gratuito borra todo cada vez que se reinicia.
 
 1. Suba la carpeta del programa (el archivo `cooperativa-nfc.zip` descomprimido) a una cuenta de **GitHub** (github.com → *New repository* → *uploading an existing file*).
 2. En **Render**: *New* → *Web Service* → elija ese repositorio. Render detecta el archivo `Dockerfile` solo.
-3. Agregue un **disco** (*Disks* → *Add disk*): ruta de montaje `/data`, 1 GB es suficiente.
+3. Elija cómo guardar los datos (sección **Guardar los datos**, más abajo).
 4. En *Environment* (variables) escriba estas líneas:
 
    | Nombre | Valor |
@@ -32,17 +32,29 @@ Necesita (costo aproximado 7 a 10 USD al mes): una cuenta en un servicio de hosp
    | `NODE_ENV` | `production` |
    | `JWT_SECRET` | una frase larga y secreta de al menos 32 letras y números (ejemplo: `zuki-morelia-2026-clave-muy-larga-x7Q9pL2`) — **no la comparta** |
    | `SUPERADMIN_USER` | `zuki` (o el usuario que prefiera) |
-   | `SUPERADMIN_PASSWORD` | una contraseña temporal de al menos 8 caracteres |
+   | `SUPERADMIN_PASSWORD` | su contraseña de superadministrador (al menos 10 caracteres) |
    | `APP_URL` | la dirección que le dio Render, por ejemplo `https://cooperativa-zuki.onrender.com` |
    | `TRUST_PROXY` | `1` |
 
 5. Pulse **Deploy** (Desplegar). En unos minutos estará lista la dirección, por ejemplo `https://cooperativa-zuki.onrender.com`.
-6. Abra esa dirección en el navegador, entre con `zuki` y la contraseña temporal. **El sistema le pedirá cambiarla**: elija una contraseña larga y guárdela en un lugar seguro.
+6. Abra esa dirección en el navegador y entre con `zuki` y esa contraseña. Puede cambiarla en **Mi cuenta**. Guárdela en un lugar seguro.
 
-✅ Listo: ya ve la pantalla **Instituciones** (vacía).
+✅ Listo: ya ve la pantalla **Escuelas** (vacía).
 
 > Consejo: anote la dirección del servidor; la usará en la caja y la recibirán los padres.
-> Respaldo: pida al técnico que programe una copia diaria del archivo `/data/servidor.db`.
+> Respaldo: en **Seguridad y emergencia → Descargar respaldo** baje una copia cada semana y guárdela en una USB o en su nube.
+
+### Guardar los datos (muy importante)
+
+| Opción | Costo | Para qué |
+|---|---|---|
+| **Turso** (turso.tech) | Gratis | Prueba piloto. Se crea una cuenta, una base y se copian 2 datos a Render. |
+| **Render Starter + disco 1 GB** | ≈ 7.25 USD al mes | Escuela real: el servidor no se “duerme” y los datos quedan en disco con copia diaria. |
+
+Pasos exactos en el `README.md`, sección 8. Para saber cuál está activa: **Seguridad y emergencia → Dónde se guardan los datos** (si dice **TEMPORAL**, los datos se borrarán).
+
+### Si olvida la contraseña del superadministrador
+En Render → *Environment* agregue `SUPERADMIN_RESET_PASSWORD` con una contraseña nueva, guarde, entre con ella y **después borre esa variable**.
 
 ---
 
@@ -50,13 +62,13 @@ Necesita (costo aproximado 7 a 10 USD al mes): una cuenta en un servicio de hosp
 
 En el servidor, con la cuenta del **superadministrador**:
 
-1. **Instituciones** → botón **+ Nueva escuela**.
+1. **Escuelas** → botón **+ Nueva escuela**.
 2. Escriba el **nombre** de la escuela, el **estado** (*En prueba* si es demostración, *Activa* si ya contrató), el contacto y una nota del plan o cuota (ejemplo: "Plan anual $1,500 MXN/mes, paga el día 5").
 3. En "Administrador de la escuela" escriba un **usuario** (ejemplo: `admin.juarez`) y el nombre de la persona.
-4. Pulse **Crear escuela**. Aparece una **contraseña temporal**: **anótela** (solo se muestra una vez) y entréguela a esa persona junto con el usuario y la dirección del servidor.
-5. El administrador de la escuela entra a la dirección del servidor con ese usuario; el sistema le pedirá cambiar la contraseña.
+4. Pulse **Crear escuela**. Aparece la **contraseña** del administrador con un botón **Copiar**: se muestra una sola vez; entréguela a esa persona junto con el usuario y la dirección del servidor.
+5. El administrador de la escuela entra a la dirección del servidor con ese usuario y contraseña. **Solo usted (superadministrador) puede cambiar contraseñas**: si alguien la olvida, vaya a **Cuentas → 🔑 Contraseña**.
 
-En **Instituciones → Administrar** puede después: editar datos y plan, **suspender** (si no paga) o **activar**, crear más usuarios (cajeros), restablecer contraseñas, ver ventas, recargas, alumnos y la **última sincronización** de la caja, y revocar cajas.
+En **Escuelas → Administrar** puede después: editar datos y plan, **suspender** (si no paga) o **activar**, crear más usuarios (cajeros), asignar contraseñas nuevas, ver ventas, recargas, alumnos y la **última sincronización** de la caja, y revocar cajas.
 
 ---
 
@@ -69,7 +81,7 @@ En **Instituciones → Administrar** puede después: editar datos y plan, **susp
    **Mac**: abra el zip, arrastre la app a *Aplicaciones*, y la primera vez ábrala con **clic derecho → Abrir → Abrir**.
 3. Conecte el **lector** de tarjetas al USB.
 4. Abra **Cooperativa NFC**. La primera vez pregunta cómo empezar: elija **Empezar con base vacía**.
-5. Entre con `admin` / `admin123`; le pedirá crear una contraseña nueva. (Esta cuenta es solo de esta computadora; en el Paso 4 se usará la cuenta de la escuela.)
+5. Si eligió **base vacía**, aparece un cuadro con el usuario `admin` y una contraseña: **anótela** y entre con ella. (Esta cuenta es solo de esta computadora; en el Paso 4 se usará la cuenta de la escuela.)
 
 ---
 
@@ -78,7 +90,7 @@ En **Instituciones → Administrar** puede después: editar datos y plan, **susp
 En la caja, con el usuario administrador:
 
 1. Menú **Ajustes** → recuadro **Servidor en la nube y sincronización**.
-2. Escriba la **dirección del servidor** (la del Paso 1), y el **usuario y contraseña del administrador de la escuela** (los del Paso 2, ya cambiada).
+2. Escriba la **dirección del servidor** (la del Paso 1), y el **usuario y contraseña del administrador de la escuela** (los del Paso 2).
 3. Pulse **Probar conexión** (debe decir "Conexión correcta") y luego **Vincular este equipo**.
 4. Abajo a la izquierda debe aparecer un punto verde: **Sincronizado**. En Ajustes verá "Escuela: *nombre de su escuela*".
 
@@ -96,7 +108,7 @@ En la caja (administrador):
 
 1. **Productos**: revise las categorías (Dulces, Refrescos, Frituras, Saludable, Comida) y agregue cada producto con su **precio en pesos**.
 2. **Tutores y alumnos** → **+ Alumno**: escriba nombre completo y grado/grupo (ejemplo `3° A`). No necesita escribir al papá: él se vinculará con su código.
-3. **Cuenta del cajero**: como la caja está vinculada, las cuentas del personal se crean **en el servidor**: el administrador de la escuela entra a la dirección del servidor (en el navegador) → **Usuarios** → **+ Usuario** → rol *Cajero*. (O se la pide al superadministrador: *Administrar → + Usuario*.) El cajero entra **primero una vez en el navegador** para cambiar su contraseña temporal; después ya puede entrar en la caja con ese usuario; la caja lo recuerda para poder entrar aunque no haya internet.
+3. **Cuenta del cajero**: como la caja está vinculada, las cuentas del personal se crean **en el servidor**: el administrador de la escuela entra a la dirección del servidor (en el navegador) → **Personal** → **+ Nueva cuenta** → puesto *Cajero*. (O se la pide al superadministrador: *Administrar → + Usuario*.) El cajero ya puede entrar en la caja con ese usuario y contraseña; la caja lo recuerda para poder entrar aunque no haya internet.
 
 ---
 
@@ -191,8 +203,9 @@ En la caja (cajero o administrador):
 | Indicador rojo "Error de sincronización" | Pulse el indicador para reintentar. Si dice "suspendido", comuníquese con Zuki Company. |
 | "Otro equipo es el principal" | Hay otra caja de la escuela enviando datos. En Ajustes, con la cuenta del administrador de la escuela, pulse **Hacer principal** en la caja correcta. |
 | "Esa tarjeta ya está registrada en otra escuela" | Esa tarjeta pertenece a otra escuela; use otra tarjeta. |
-| Un papá olvidó su contraseña | En la página de inicio del servidor: **¿Olvidaste tu contraseña?** |
-| El administrador olvidó su contraseña | El superadministrador: *Instituciones → Administrar → Restablecer contraseña*. |
+| Un papá olvidó su contraseña | Le pide una nueva a la escuela; el superadministrador la asigna en **Cuentas → 🔑 Contraseña**. |
+| El administrador olvidó su contraseña | El superadministrador: **Cuentas → 🔑 Contraseña**. |
+| Sospecha de robo de contraseña o recargas falsas | Superadministrador: **Seguridad y emergencia** → congelar recargas de esa escuela, bloquear administradores, o el botón rojo **ALERTA ROJA** (todo queda en solo lectura). Revise **Alertas** y **Bitácora**. |
 | La escuela dejó de pagar | El superadministrador: *Administrar → Suspender*. El personal ya no podrá entrar; los papás aún ven el saldo. Para reactivar: **Activar**. |
 
 ¿Dudas? Zuki Company — soporte de Cooperativa NFC.

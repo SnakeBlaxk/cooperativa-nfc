@@ -168,6 +168,47 @@ CREATE TABLE IF NOT EXISTS devices (                -- servidor: equipos de escr
   last_seen_at TEXT,
   created_at TEXT NOT NULL
 );
+-- Seguridad (servidor): bitácora de auditoría, alertas y ajustes por escuela
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  actor_id INTEGER,
+  actor_name TEXT,
+  actor_role TEXT,
+  school_id INTEGER,
+  ip TEXT,
+  action TEXT NOT NULL,
+  target_type TEXT,
+  target_id TEXT,
+  details TEXT,
+  severity TEXT NOT NULL DEFAULT 'info'
+);
+CREATE INDEX IF NOT EXISTS idx_audit_date ON audit_log(created_at);
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  school_id INTEGER,
+  kind TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'media',
+  message TEXT NOT NULL,
+  details TEXT,
+  ref_type TEXT,
+  ref_id INTEGER,
+  ack_at TEXT,
+  ack_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_open ON alerts(ack_at, created_at);
+CREATE TABLE IF NOT EXISTS school_security (
+  school_id INTEGER PRIMARY KEY REFERENCES schools(id),
+  freeze_recharges INTEGER NOT NULL DEFAULT 0,
+  freeze_sales INTEGER NOT NULL DEFAULT 0,
+  read_only INTEGER NOT NULL DEFAULT 0,
+  daily_recharge_limit_cents INTEGER,
+  large_recharge_cents INTEGER,
+  hours_start TEXT,
+  hours_end TEXT,
+  updated_at TEXT
+);
 CREATE TABLE IF NOT EXISTS invitations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   code TEXT NOT NULL UNIQUE,
@@ -221,6 +262,19 @@ class Database {
     add('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');
     add('transactions', 'processed_by_name', 'TEXT');
     add('transactions', 'origin_device', 'TEXT');
+    // Seguridad: último acceso, bloqueo por intentos fallidos, papelera (borrado lógico), recargas marcadas
+    add('users', 'last_login_at', 'TEXT');
+    add('users', 'last_login_ip', 'TEXT');
+    add('users', 'failed_logins', 'INTEGER NOT NULL DEFAULT 0');
+    add('users', 'locked_until', 'INTEGER');
+    add('users', 'password_set_at', 'TEXT');
+    add('users', 'password_set_by', 'TEXT');
+    add('products', 'deleted_at', 'TEXT');
+    // Política de contraseñas: solo el superadministrador cambia contraseñas, así que nadie más
+    // puede quedar obligado a cambiarla (se quedaría sin poder entrar).
+    this.db.exec("UPDATE users SET must_change_password = 0 WHERE role <> 'superadmin' AND must_change_password <> 0");
+    add('transactions', 'flag', 'TEXT');
+    add('transactions', 'flag_note', 'TEXT');
     for (const t of ['users', 'children', 'cards', 'categories', 'products', 'transactions', 'devices', 'sync_changes']) add(t, 'school_id', 'INTEGER');
     // Identificador global (UUID de 128 bits) para sincronizar sin depender de los id locales
     for (const t of SYNC_TABLES) {
@@ -254,7 +308,16 @@ class Database {
       CREATE INDEX IF NOT EXISTS idx_cards_school ON cards(school_id);
       CREATE INDEX IF NOT EXISTS idx_tx_school_date ON transactions(school_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_sync_changes_school ON sync_changes(school_id, seq);`);
+    // Protección del superadministrador: no se puede borrar, degradar ni desactivar (ni por SQL de la app)
+    this.db.exec(`CREATE TRIGGER IF NOT EXISTS trg_superadmin_nodelete BEFORE DELETE ON users WHEN OLD.role = 'superadmin'
+        BEGIN SELECT RAISE(ABORT, 'El superadministrador no se puede eliminar'); END;
+      CREATE TRIGGER IF NOT EXISTS trg_superadmin_nodemote BEFORE UPDATE OF role ON users WHEN OLD.role = 'superadmin' AND NEW.role <> 'superadmin'
+        BEGIN SELECT RAISE(ABORT, 'El superadministrador no se puede degradar'); END;
+      CREATE TRIGGER IF NOT EXISTS trg_superadmin_noinactive BEFORE UPDATE OF active ON users WHEN OLD.role = 'superadmin' AND NEW.active = 0
+        BEGIN SELECT RAISE(ABORT, 'El superadministrador no se puede desactivar'); END;`);
   }
+  // Ganchos tras guardar en disco (p. ej. copia remota de la base)
+  onSave(fn) { (this._saveHooks = this._saveHooks || []).push(fn); }
   // Escritorio: registra en sync_outbox cada alta/cambio de las tablas sincronizadas.
   // No registra cambios aplicados desde el servidor (meta sync_applying = '1').
   enableOutbox() {
@@ -314,14 +377,16 @@ class Database {
   }
   // Guarda la base en disco de forma atómica (archivo temporal + rename).
   save() {
-    if (!this.filePath) return;
+    if (!this.filePath) { this._runSaveHooks(); return; }
     const data = Buffer.from(this.db.export());
     const tmp = this.filePath + '.tmp';
     fs.writeFileSync(tmp, data);
     fs.renameSync(tmp, this.filePath);
     // export() desactiva foreign_keys en sql.js; se reactiva
     this.db.exec('PRAGMA foreign_keys = ON;');
+    this._runSaveHooks();
   }
+  _runSaveHooks() { for (const fn of this._saveHooks || []) { try { fn(); } catch (e) { console.error('[db] gancho de guardado:', e.message); } } }
   exportBuffer() { return Buffer.from(this.db.export()); }
   close() { this.db.close(); }
 }

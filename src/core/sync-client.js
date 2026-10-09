@@ -54,7 +54,7 @@ function createSyncClient({ db, getConfig, fetchImpl = globalThis.fetch, timeout
   const uuidOf = (table, id) => { if (!id) return null; const r = db.get(`SELECT uuid FROM ${table} WHERE id = ?`, [id]); return r ? r.uuid : null; };
   const ser = {
     category: (id) => db.get('SELECT uuid, name FROM categories WHERE id = ?', [id]),
-    product: (id) => { const p = db.get('SELECT p.uuid, p.name, c.uuid AS category_uuid, p.price_cents, p.active, p.created_at FROM products p JOIN categories c ON c.id = p.category_id WHERE p.id = ?', [id]); return p; },
+    product: (id) => { const p = db.get('SELECT p.uuid, p.name, c.uuid AS category_uuid, p.price_cents, p.active, p.created_at, p.deleted_at FROM products p JOIN categories c ON c.id = p.category_id WHERE p.id = ?', [id]); return p; },
     child: (id) => db.get('SELECT uuid, full_name, grade, photo, active, created_at FROM children WHERE id = ?', [id]),
     card: (id) => { const k = db.get('SELECT * FROM cards WHERE id = ?', [id]); if (!k) return null; return { uuid: k.uuid, uid: k.uid, child_uuid: uuidOf('children', k.child_id), status: k.status, balance_cents: k.balance_cents, blocked_by: k.blocked_by, created_at: k.created_at }; },
     limits: (childId) => {
@@ -191,6 +191,8 @@ function createSyncClient({ db, getConfig, fetchImpl = globalThis.fetch, timeout
       const st = await http(cfg, 'GET', '/api/sync/status');
       status.is_primary = st.is_primary;
       if (st.school_name) rememberSchool(st.school_uuid, st.school_name);
+      // Banderas de seguridad del servidor (congelar recargas/ventas, solo lectura, ALERTA ROJA)
+      if (st.security) setMeta('server_security', JSON.stringify(st.security));
       const p = await http(cfg, 'GET', '/api/sync/pull?cursor=' + encodeURIComponent(meta('sync_pull_cursor') || 0));
       const applied = applyPull(p.changes);
       setMeta('sync_pull_cursor', p.cursor);
@@ -220,7 +222,6 @@ function createSyncClient({ db, getConfig, fetchImpl = globalThis.fetch, timeout
     if (!/^https?:\/\/\S+$/.test(cfg.serverUrl)) throw new Error('URL del servidor inválida');
     const login = await http(cfg, 'POST', '/api/auth/login', { identifier: username, password });
     if (login.user.role !== 'admin') throw new Error('Se requiere una cuenta de administrador del servidor');
-    if (login.must_change_password) throw new Error('Cambie primero la contraseña temporal en la app web');
     const auth = { Authorization: 'Bearer ' + login.access_token };
     const prev = meta('linked_school_uuid');
     if (prev && login.user.school_uuid && prev !== login.user.school_uuid) throw new Error(`Este equipo ya trabaja con la escuela "${meta('linked_school_name') || ''}". Para otra escuela use una base de datos nueva.`);

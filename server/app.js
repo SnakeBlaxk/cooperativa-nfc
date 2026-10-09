@@ -11,6 +11,7 @@ const { createAuth, consoleMailer } = require('../src/core/auth');
 const { seedPlatform, seedMinimal, ensureSuperadmin } = require('../src/core/seed');
 const { createPlatform } = require('../src/core/platform');
 const { createSyncServer } = require('../src/core/sync-server');
+const { createSecurity } = require('../src/core/security');
 
 // Métodos que, con una caja de escritorio sincronizada, solo se hacen en el escritorio (fuente de verdad)
 const DESKTOP_OWNED = ['purchase', 'recharge', 'adjust', 'registerCard', 'assignCard', 'reportLostAndReplace', 'createProduct', 'updateProduct', 'deleteProduct', 'createCategory', 'createChild'];
@@ -22,7 +23,9 @@ async function createServer(opts = {}) {
   if (opts.bootstrapSuperadmin && !db.get("SELECT id FROM users WHERE role = 'superadmin'")) {
     const { username, password } = opts.bootstrapSuperadmin;
     if (!password || password.length < 8) throw new Error('SUPERADMIN_PASSWORD debe tener al menos 8 caracteres');
-    ensureSuperadmin(db, { username: username || 'zuki', password, mustChange: true });
+    // La contraseña inicial viene de la variable de entorno (la eligió el dueño): no se obliga a cambiarla
+    // salvo que se pida con SUPERADMIN_FORCE_CHANGE=1.
+    ensureSuperadmin(db, { username: username || 'zuki', password, mustChange: !!opts.bootstrapSuperadmin.forceChange });
     console.log('[auth] Superadministrador inicial creado:', username || 'zuki');
   }
   // Opcional: primera escuela con su administrador (ADMIN_USER/ADMIN_PASSWORD)
@@ -44,9 +47,17 @@ async function createServer(opts = {}) {
     console.warn('[auth] JWT_SECRET no definido: usando secreto de desarrollo guardado en la base.');
   }
   const sync = createSyncServer(db);
-  const auth = createAuth(db, svc, { jwtSecret: secret, mailer: opts.mailer || consoleMailer(), appUrl: opts.appUrl || process.env.APP_URL, onChildLinked: (id) => sync.recordChild('child_link', id), ...(opts.authOptions || {}) });
+  const persistence = opts.persistence || (() => ({ mode: opts.dbPath ? 'archivo' : 'memoria' }));
+  const security = createSecurity(db, { svc, sync, persistence });
+  sync.hooks.onRecharge = (id) => security.inspectRecharge(id);
+  // Recuperación de emergencia del superadministrador (SUPERADMIN_RESET_PASSWORD)
+  if (opts.superadminReset && opts.superadminReset.password) {
+    const r = security.emergencyReset(opts.superadminReset);
+    if (r && r.applied) console.warn(`[auth] Contraseña del superadministrador "${r.username}" restablecida con SUPERADMIN_RESET_PASSWORD. Quite la variable cuando ya haya entrado.`);
+  }
+  const auth = createAuth(db, svc, { jwtSecret: secret, mailer: opts.mailer || consoleMailer(), appUrl: opts.appUrl || process.env.APP_URL, onChildLinked: (id) => sync.recordChild('child_link', id), security, ...(opts.authOptions || {}) });
 
-  const platform = createPlatform(db, { svc, sync, auth });
+  const platform = createPlatform(db, { svc, sync, auth, security });
   const app = express();
   app.disable('x-powered-by');
   if (opts.trustProxy || process.env.TRUST_PROXY) app.set('trust proxy', 1);
@@ -57,7 +68,7 @@ async function createServer(opts = {}) {
     next();
   });
 
-  const STATUS = { OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, LIMITE_INTENTOS: 429, INTERNO: 500 };
+  const STATUS = { BLOQUEADO_SEGURIDAD: 423, SISTEMA_BLOQUEADO: 403, OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, LIMITE_INTENTOS: 429, INTERNO: 500 };
   const send = (res, fn) => {
     Promise.resolve().then(fn).then((data) => res.json({ ok: true, data })).catch((e) => {
       const code = e.code || 'INTERNO';
@@ -80,7 +91,7 @@ async function createServer(opts = {}) {
   const requireRole = (...roles) => (req, res, next) => (roles.includes(req.user.role) ? next() : res.status(403).json({ ok: false, error: 'No tienes permiso para esta acción', code: 'PROHIBIDO' }));
 
   // ----- salud -----
-  app.get('/api/health', (req, res) => res.json({ ok: true, data: { status: 'ok', time: new Date().toISOString() } }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, data: { status: 'ok', time: new Date().toISOString(), persistence: persistence().mode } }));
 
   // ----- autenticación -----
   app.post('/api/auth/login', (req, res) => send(res, () => auth.login(req.body.identifier || req.body.username, req.body.password, ctx(req))));
@@ -88,7 +99,16 @@ async function createServer(opts = {}) {
   app.post('/api/auth/logout', (req, res) => send(res, () => auth.logout(req.body.refresh_token)));
   app.post('/api/auth/logout-all', authenticate({ allowMustChange: true }), (req, res) => send(res, () => auth.logoutAll(req.user)));
   app.get('/api/auth/me', authenticate({ allowMustChange: true }), (req, res) => send(res, () => req.user));
-  app.post('/api/auth/change-password', authenticate({ allowMustChange: true }), (req, res) => send(res, () => auth.changePassword(req.user, req.body.current, req.body.next, ctx(req))));
+  // Solo el superadministrador cambia su propia contraseña aquí; las demás cuentas no pueden (política).
+  app.post('/api/auth/change-password', authenticate({ allowMustChange: true }), (req, res) => send(res, () => {
+    if (req.user.role !== 'superadmin') {
+      security.audit(req.user, 'cambio_contrasena_rechazado', { ip: req.ip, severity: 'aviso' });
+      throw Object.assign(new Error('Solo el administrador de la plataforma (Zuki Company) puede cambiar contraseñas. Pídeselo a él.'), { code: 'PROHIBIDO' });
+    }
+    const r = auth.changePassword(req.user, req.body.current, req.body.next, ctx(req));
+    security.audit(req.user, 'contrasena_propia', { ip: req.ip, target_type: 'user', target_id: req.user.id, severity: 'aviso' });
+    return r;
+  }));
   app.post('/api/auth/forgot', (req, res) => send(res, () => auth.requestPasswordReset(req.body.identifier, ctx(req))));
   app.post('/api/auth/reset', (req, res) => send(res, () => auth.resetPassword(req.body.token, req.body.password)));
   app.post('/api/auth/register', (req, res) => send(res, () => auth.registerWithInvitation(req.body || {}, ctx(req))));
@@ -123,24 +143,40 @@ async function createServer(opts = {}) {
   app.get('/api/sync/status', deviceAuth, (req, res) => send(res, () => {
     const sc = db.get('SELECT uuid, name, status, primary_device_id FROM schools WHERE id = ?', [req.device.school_id]) || {};
     const p = sc.primary_device_id || null;
-    return { device_id: req.device.id, device_name: req.device.name, primary_device: p, is_primary: !p || p === req.device.id, school_uuid: sc.uuid, school_name: sc.name, school_status: sc.status };
+    const f = security.flagsFor(req.device.school_id);
+    return { device_id: req.device.id, device_name: req.device.name, primary_device: p, is_primary: !p || p === req.device.id, school_uuid: sc.uuid, school_name: sc.name, school_status: sc.status,
+      security: { lockdown: f.lockdown, freeze_recharges: f.freeze_recharges, freeze_sales: f.freeze_sales, read_only: f.read_only, daily_recharge_limit_cents: f.daily_recharge_limit_cents } };
   }));
   // Códigos de invitación para la hoja que imprime la caja (alumnos ya sincronizados de su escuela)
   app.post('/api/sync/invitations', deviceAuth, (req, res) => send(res, () => auth.invitationsForSchool(req.device.school_id, (req.body || {}).child_uuids, { reuse: true, skipLinked: (req.body || {}).include_linked ? false : true })));
 
   // ----- panel del superadministrador (Zuki Company) -----
-  app.post('/api/super/:method', authenticate(), requireRole('superadmin'), (req, res) => send(res, () => platform.handle(req.user, req.params.method, req.body || {})));
+  app.post('/api/super/:method', authenticate(), requireRole('superadmin'), (req, res) => send(res, () => platform.handle(req.user, req.params.method, req.body || {}, ctx(req))));
+  // Respaldo descargable de toda la base (archivo SQLite)
+  app.get('/api/super-backup', authenticate(), requireRole('superadmin'), (req, res) => {
+    const buf = security.backup(req.user, ctx(req));
+    const d = new Date(); const p2 = (n) => String(n).padStart(2, '0');
+    res.set({ 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="respaldo-cooperativa-${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.db"`, 'Cache-Control': 'no-store' });
+    res.send(buf);
+  });
 
   // ----- lógica de negocio (misma que el escritorio). Permisos validados en el servicio -----
+  // Operaciones que quedan en la bitácora (quién, cuándo, IP, qué)
+  const AUDIT_RPC = { recharge: 'recarga', adjust: 'ajuste', deleteProduct: 'producto_borrado', createUser: 'usuario_creado', updateUser: 'usuario_editado', setCardStatus: 'tarjeta_estado', reportLostAndReplace: 'tarjeta_perdida', registerCard: 'tarjeta_registrada', assignCard: 'tarjeta_asignada', updateProduct: 'producto_editado', createProduct: 'producto_creado', createChild: 'alumno_creado' };
+  const SEVERITY = { recharge: 'info', adjust: 'aviso', deleteProduct: 'aviso', reportLostAndReplace: 'aviso' };
   app.post('/api/rpc/:method', authenticate(), (req, res) => {
     const method = req.params.method;
     if (['login', 'logout', 'me'].includes(method)) return res.status(400).json({ ok: false, error: 'Usa /api/auth/*', code: 'VALIDACION' });
-    if (req.user.role === 'superadmin' && method !== 'changePassword') return res.status(403).json({ ok: false, error: 'El superadministrador usa el panel de instituciones', code: 'PROHIBIDO' });
+    if (method === 'securityStatus') return res.json({ ok: true, data: security.statusFor(req.user) });
+    if (method === 'changePassword') return res.status(403).json({ ok: false, error: 'Solo el administrador de la plataforma (Zuki Company) puede cambiar contraseñas.', code: 'PROHIBIDO' });
+    if (req.user.role === 'superadmin') return res.status(403).json({ ok: false, error: 'El superadministrador usa el panel de instituciones', code: 'PROHIBIDO' });
     if (DESKTOP_OWNED.includes(method) && ['admin', 'cajero'].includes(req.user.role) && sync.isSynced(req.user.school_id)) {
       return res.status(409).json({ ok: false, error: 'Este servidor está sincronizado con la caja de escritorio: ventas, recargas, tarjetas, alumnos y productos se registran en la caja.', code: 'SOLO_ESCRITORIO' });
     }
     const args = req.body || {};
+    try { security.guard(req.user, method, args, ctx(req)); } catch (e) { return res.status(STATUS[e.code] || 423).json({ ok: false, error: e.message, code: e.code }); }
     const prevTutor = method === 'updateChild' && args.id ? (db.get('SELECT tutor_id FROM children WHERE id = ?', [Number(args.id)]) || {}).tutor_id : undefined;
+    const prevProduct = method === 'updateProduct' && args.id ? db.get('SELECT name, price_cents, active FROM products WHERE id = ?', [Number(args.id)]) : null;
     const r = api.handle({ user: req.user }, method, args);
     if (r.ok) {
       // Bitácora de ajustes del servidor que los equipos de escritorio descargarán
@@ -151,6 +187,17 @@ async function createServer(opts = {}) {
         sync.recordChild('child_profile', Number(args.id));
         if (r.data && r.data.tutor_id !== prevTutor) sync.recordChild('child_link', Number(args.id));
       }
+      try {
+        if (AUDIT_RPC[method] && !(method === 'updateProduct' && prevProduct && prevProduct.price_cents === r.data.price_cents && prevProduct.name === r.data.name && !!prevProduct.active === !!r.data.active)) {
+          const det = { ...args };
+          if (method === 'recharge' || method === 'adjust') { det.saldo_nuevo = r.data.balance_cents; det.transaccion = r.data.transaction_id; }
+          if (method === 'deleteProduct' && r.data.product) det.producto = r.data.product.name;
+          if (method === 'updateProduct' && prevProduct) det.antes = prevProduct;
+          security.audit(req.user, AUDIT_RPC[method], { ip: req.ip, target_type: method.includes('Product') ? 'product' : (method.includes('User') ? 'user' : (method === 'recharge' || method === 'adjust' ? 'transaction' : 'card')), target_id: (r.data && (r.data.transaction_id || r.data.id)) || args.id || args.card_id || null, details: det, severity: SEVERITY[method] || 'info' });
+        }
+        if (method === 'deleteProduct') security.alert({ school_id: req.user.school_id, kind: 'borrado', severity: 'baja', message: `${req.user.full_name} envió a la papelera el producto "${r.data.product ? r.data.product.name : args.id}".`, ref_type: 'product', ref_id: Number(args.id) });
+        if (method === 'recharge' && r.data.transaction_id) security.inspectRecharge(r.data.transaction_id);
+      } catch (e) { console.error('[seguridad]', e); }
       return res.json(r);
     }
     return res.status(STATUS[r.code] || 400).json(r);

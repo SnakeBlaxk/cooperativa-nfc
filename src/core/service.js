@@ -135,13 +135,15 @@ function createService(db, opts = {}) {
     const s = db.get('SELECT status FROM schools WHERE id = ?', [u.school_id]);
     if (s && s.status === 'suspendida') throw new AppError('El servicio de esta escuela está suspendido. Comunícate con Zuki Company.', 'ESCUELA_SUSPENDIDA');
   }
+  // Política: solo el superadministrador cambia contraseñas (la suya y, desde su panel, las de los demás).
   function changePassword(actor, current, next) {
     requireRole(actor, ...ALL_ROLES);
+    if (actor.role !== 'superadmin') throw new AppError('Solo el administrador de la plataforma (Zuki Company) puede cambiar contraseñas. Pídeselo a él.', 'PROHIBIDO');
     const u = db.get('SELECT * FROM users WHERE id = ?', [actor.id]);
     if (!bcrypt.compareSync(String(current || ''), u.password_hash)) throw new AppError('La contraseña actual es incorrecta', 'VALIDACION');
-    const p = str(next, 'nueva contraseña', { min: 6, max: 100 });
+    const p = str(next, 'nueva contraseña', { min: 10, max: 100 });
     if (p === current) throw new AppError('La nueva contraseña debe ser distinta de la actual', 'VALIDACION');
-    db.run('UPDATE users SET password_hash = ?, must_change_password = 0, token_version = token_version + 1 WHERE id = ?', [bcrypt.hashSync(p, 10), actor.id]);
+    db.run('UPDATE users SET password_hash = ?, must_change_password = 0, token_version = token_version + 1, password_set_at = ?, password_set_by = ? WHERE id = ?', [bcrypt.hashSync(p, 10), ts(), 'propio', actor.id]);
     return publicUser(db.get('SELECT * FROM users WHERE id = ?', [actor.id]));
   }
 
@@ -160,7 +162,7 @@ function createService(db, opts = {}) {
     const full_name = str(data.full_name, 'nombre', { max: 120 });
     assertUniqueIdentity(username, email, phone);
     const r = db.run('INSERT INTO users (username,password_hash,role,full_name,phone,email,must_change_password,school_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-      [username, bcrypt.hashSync(password, 10), role, full_name, phone, email, data.must_change_password ? 1 : 0, sch(actor), ts()]);
+      [username, bcrypt.hashSync(password, 10), role, full_name, phone, email, 0, sch(actor), ts()]);
     return publicUser(db.get('SELECT * FROM users WHERE id = ?', [r.lastId]));
   }
   function assertUniqueIdentity(username, email, phone, exceptId = 0) {
@@ -170,6 +172,7 @@ function createService(db, opts = {}) {
   }
   function updateUser(actor, id, data) {
     requireRole(actor, 'admin');
+    if (data.password) throw new AppError('Solo el administrador de la plataforma (Zuki Company) puede cambiar contraseñas.', 'PROHIBIDO');
     const u = getVisibleUser(actor, id);
     const full_name = data.full_name !== undefined ? str(data.full_name, 'nombre') : u.full_name;
     const phone = data.phone !== undefined ? (data.phone ? normPhone(data.phone) : null) : u.phone;
@@ -179,11 +182,7 @@ function createService(db, opts = {}) {
     const active = data.active !== undefined ? (data.active ? 1 : 0) : u.active;
     if (u.id === actor.id && !active) throw new AppError('No puedes desactivar tu propio usuario', 'VALIDACION');
     db.run('UPDATE users SET full_name=?, phone=?, email=?, active=? WHERE id=?', [full_name, phone, email, active, u.id]);
-    if (data.password) {
-      const p = str(data.password, 'contraseña', { min: 6, max: 100 });
-      // Contraseña asignada por el admin = temporal: se obliga a cambiarla y se cierran sesiones
-      db.run('UPDATE users SET password_hash=?, must_change_password=?, token_version = token_version + 1 WHERE id=?', [bcrypt.hashSync(p, 10), data.must_change_password === false ? 0 : 1, u.id]);
-    }
+    if (data.password) throw new AppError('Solo el administrador de la plataforma (Zuki Company) puede cambiar contraseñas.', 'PROHIBIDO');
     if (!active) db.run('UPDATE users SET token_version = token_version + 1 WHERE id = ?', [u.id]);
     return publicUser(db.get('SELECT * FROM users WHERE id = ?', [u.id]));
   }
@@ -283,7 +282,7 @@ function createService(db, opts = {}) {
     requireRole(actor, ...ROLES);
     const onlyActive = !!(f && f.onlyActive);
     const rows = db.all(`SELECT p.*, c.name AS category_name FROM products p JOIN categories c ON c.id = p.category_id
-      WHERE 1=1${catalogScope(actor, f || {}, 'p')} ${onlyActive ? 'AND p.active = 1' : ''} ORDER BY c.name, p.name`);
+      WHERE p.deleted_at IS NULL${catalogScope(actor, f || {}, 'p')} ${onlyActive ? 'AND p.active = 1' : ''} ORDER BY c.name, p.name`);
     return rows.map((p) => ({ ...p, active: !!p.active }));
   }
   function productData(actor, data, prev = {}) {
@@ -302,26 +301,19 @@ function createService(db, opts = {}) {
   }
   function updateProduct(actor, id, data) {
     requireRole(actor, 'admin');
-    const prev = db.get(`SELECT * FROM products WHERE id = ?${scope(actor)}`, [int(id, 'id', { min: 1 })]);
+    const prev = db.get(`SELECT * FROM products WHERE id = ? AND deleted_at IS NULL${scope(actor)}`, [int(id, 'id', { min: 1 })]);
     if (!prev) throw new AppError('Producto no encontrado', 'NO_ENCONTRADO');
     const p = productData(actor, data, prev);
     db.run('UPDATE products SET name=?, category_id=?, price_cents=?, active=? WHERE id=?', [p.name, p.category_id, p.price_cents, p.active, prev.id]);
     return db.get('SELECT * FROM products WHERE id = ?', [prev.id]);
   }
+  // Borrado lógico: el producto pasa a la papelera (se puede restaurar) y se oculta del punto de venta
   function deleteProduct(actor, id) {
     requireRole(actor, 'admin');
-    const p = db.get(`SELECT * FROM products WHERE id = ?${scope(actor)}`, [int(id, 'id', { min: 1 })]);
+    const p = db.get(`SELECT * FROM products WHERE id = ? AND deleted_at IS NULL${scope(actor)}`, [int(id, 'id', { min: 1 })]);
     if (!p) throw new AppError('Producto no encontrado', 'NO_ENCONTRADO');
-    const used = db.get('SELECT COUNT(*) AS n FROM transaction_items WHERE product_id = ?', [p.id]).n;
-    return db.transaction(() => {
-      if (used > 0) { // conservar historial: se desactiva
-        db.run('UPDATE products SET active = 0 WHERE id = ?', [p.id]);
-        return { deleted: false, deactivated: true, message: 'El producto tiene ventas registradas; se desactivó en lugar de borrarse.' };
-      }
-      db.run('DELETE FROM prohibited_products WHERE product_id = ?', [p.id]);
-      db.run('DELETE FROM products WHERE id = ?', [p.id]);
-      return { deleted: true };
-    });
+    db.run('UPDATE products SET active = 0, deleted_at = ? WHERE id = ?', [ts(), p.id]);
+    return { deleted: true, soft: true, product: { id: p.id, name: p.name, school_id: p.school_id }, message: 'Producto enviado a la papelera (se puede restaurar).' };
   }
 
   // ---------- tarjetas ----------
