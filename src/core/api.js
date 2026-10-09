@@ -41,6 +41,18 @@ function createApi(svc) {
     listMovements: (u, a) => svc.listMovements(u, a),
     childSummary: (u, a) => svc.childSummary(u, a.child_id),
     dashboard: (u) => svc.dashboard(u),
+    addStock: (u, a) => svc.addStock(u, a),
+    listStockMoves: (u, a) => svc.listStockMoves(u, a),
+    getInventorySettings: (u) => svc.getInventorySettings(u),
+    setInventorySettings: (u, a) => svc.setInventorySettings(u, a),
+    listSchoolNotices: (u) => svc.listSchoolNotices(u),
+    markNoticesRead: (u) => svc.markNoticesRead(u),
+    reverseSale: (u, a) => svc.reverseSale(u, a),
+    report: (u, a) => svc.report(u, a),
+    getPushPrefs: (u) => svc.getPushPrefs(u),
+    setPushPrefs: (u, a) => svc.setPushPrefs(u, a),
+    pushSubscribe: (u, a) => svc.pushSubscribe(u, a),
+    pushUnsubscribe: (u, a) => svc.pushUnsubscribe(u, a),
   };
   // session: objeto mutable { user }
   function handle(session, method, args) {

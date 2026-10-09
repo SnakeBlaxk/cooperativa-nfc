@@ -174,6 +174,7 @@
       return { ok: true, data: { name, bytes: blob.size } };
     },
     openDataFolder: async () => ({ ok: false }),
+    push: { key: () => req('/api/push/key', null, { method: 'GET' }), test: () => authed('/api/push/test', {}) },
     auth: {
       forgot: (identifier) => req('/api/auth/forgot', { identifier }),
       reset: (token, password) => req('/api/auth/reset', { token, password }),

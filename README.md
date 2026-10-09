@@ -387,3 +387,11 @@ Otras opciones: **VPS** (DigitalOcean, Hetzner, Lightsail; ~5 USD/mes) con Node 
 - `npm run e2e:web` y `npm run e2e` (con `xvfb-run` en Linux): recorren todas las pantallas por rol con el diseño v2 y guardan capturas en `docs/capturas/v2/`; verifican que el inicio de sesión no muestra credenciales, que el superadmin asigna una contraseña y el cajero entra con ella, ALERTA ROJA y desbloqueo, que admin/cajero no pueden cambiar contraseñas, ventas aprobadas/rechazadas, lector USB tipo teclado, sincronización con un servidor real, programar tarjetas y registro con invitación.
 
 Más: integración con lectores en `INTEGRACION_NFC.md`; mejoras futuras en `PENDIENTES.md`.
+
+## v2.1 — Notificaciones para padres, Reportes e Inventario
+
+- **Notificaciones (padres, PWA):** en "Mis hijos" → **Activar notificaciones**. Avisos de cada compra (productos, monto y saldo restante), compras rechazadas y saldo bajo (umbral configurable, $50 por defecto, un aviso por cada vez que baja). Cada tipo se puede apagar. En iPhone/iPad solo funciona con la app agregada a la pantalla de inicio (iOS 16.4+); la app lo indica. Las suscripciones vencidas (404/410) se borran solas.
+  Variables de entorno: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (`mailto:...`). Sin ellas, el servidor genera llaves y las guarda en la base (siguen funcionando).
+- **Reportes (administrador):** Hoy / Esta semana / Este mes / Personalizado; ventas, número de ventas, ticket promedio, recargas, ventas por día, más vendidos, por cajero y rechazadas. **Descargar PDF**, **Descargar imagen** (PNG) y Excel (CSV). Botón **Corte del día**. El cajero solo ve su **Corte del día**.
+- **Inventario:** existencias (piezas) y stock mínimo opcionales por producto (en blanco = sin control); se descuentan en la misma transacción de la venta y regresan al **cancelar una venta** (Movimientos → Cancelar venta). Opción "No vender si no hay existencias". **+ Entrada** con bitácora ("Movimientos de inventario"). Al llegar al mínimo se crea un aviso en **Notificaciones** (con insignia) y el filtro **Por agotarse** en Productos.
+- Migración: solo tablas y columnas nuevas (no se borra ni reescribe nada). Pruebas: `npm test`, `xvfb-run npx electron scripts/e2e-v21.js` (capturas 90–94).

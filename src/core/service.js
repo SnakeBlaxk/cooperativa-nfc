@@ -317,6 +317,7 @@ function createService(db, opts = {}) {
     return {
       unread: db.get('SELECT COUNT(*) AS n FROM child_change_requests WHERE school_id = ? AND admin_read_at IS NULL', [sid]).n,
       pending: db.get("SELECT COUNT(*) AS n FROM child_change_requests WHERE school_id = ? AND status = 'pendiente'", [sid]).n,
+      notices: db.get('SELECT COUNT(*) AS n FROM school_notices WHERE school_id = ? AND read_at IS NULL', [sid]).n,
     };
   }
   function markChangeRequestsRead(actor) {
@@ -372,9 +373,72 @@ function createService(db, opts = {}) {
   function listProducts(actor, f = {}) {
     requireRole(actor, ...ROLES);
     const onlyActive = !!(f && f.onlyActive);
+    const lowOnly = !!(f && f.low);
     const rows = db.all(`SELECT p.*, c.name AS category_name FROM products p JOIN categories c ON c.id = p.category_id
-      WHERE p.deleted_at IS NULL${catalogScope(actor, f || {}, 'p')} ${onlyActive ? 'AND p.active = 1' : ''} ORDER BY c.name, p.name`);
-    return rows.map((p) => ({ ...p, active: !!p.active }));
+      WHERE p.deleted_at IS NULL${catalogScope(actor, f || {}, 'p')} ${onlyActive ? 'AND p.active = 1' : ''} ${lowOnly ? 'AND p.stock IS NOT NULL AND p.stock_min IS NOT NULL AND p.stock <= p.stock_min' : ''} ORDER BY c.name, p.name`);
+    return rows.map((p) => {
+      const o = { ...p, active: !!p.active, low_stock: isLow(p) };
+      delete o.low_notified;
+      if (actor.role === 'tutor') { delete o.stock; delete o.stock_min; delete o.low_stock; }
+      return o;
+    });
+  }
+  // ---------- inventario ----------
+  const isLow = (p) => p.stock !== null && p.stock !== undefined && p.stock_min !== null && p.stock_min !== undefined && p.stock <= p.stock_min;
+  function optStock(v, field) { return v === '' || v === null || v === undefined ? null : int(v, field, { min: 0, max: 1000000 }); }
+  function logStock(p, kind, qty, extra = {}) {
+    const after = db.get('SELECT stock FROM products WHERE id = ?', [p.id]).stock;
+    db.run('INSERT INTO stock_moves (school_id, product_id, kind, qty, stock_after, note, transaction_id, user_id, user_name, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      [p.school_id, p.id, kind, qty, after, extra.note || null, extra.transaction_id || null, extra.actor ? extra.actor.id : null, extra.actor ? (extra.actor.full_name || extra.actor.username || null) : null, ts()]);
+  }
+  // Aviso "por agotarse" una sola vez por cruce del mínimo (se rearma cuando vuelve a quedar arriba)
+  function checkLowStock(productId) {
+    const p = db.get('SELECT * FROM products WHERE id = ?', [productId]); if (!p) return;
+    if (isLow(p)) {
+      if (!p.low_notified) {
+        db.run('UPDATE products SET low_notified = 1 WHERE id = ?', [p.id]);
+        const msg = p.stock <= 0 ? `Se agotó "${p.name}" (quedan ${p.stock} piezas; mínimo ${p.stock_min}).` : `"${p.name}" está por agotarse: quedan ${p.stock} piezas (mínimo ${p.stock_min}).`;
+        db.run('INSERT INTO school_notices (school_id, kind, message, ref_type, ref_id, created_at) VALUES (?,?,?,?,?,?)', [p.school_id, 'inventario', msg, 'product', p.id, ts()]);
+      }
+    } else if (p.low_notified) db.run('UPDATE products SET low_notified = 0 WHERE id = ?', [p.id]);
+  }
+  function addStock(actor, data = {}) {
+    requireRole(actor, 'admin');
+    const p = db.get(`SELECT * FROM products WHERE id = ? AND deleted_at IS NULL${scope(actor)}`, [int(data.product_id, 'producto', { min: 1 })]);
+    if (!p) throw new AppError('Producto no encontrado', 'NO_ENCONTRADO');
+    const qty = int(data.qty, 'piezas', { min: 1, max: 100000 });
+    const note = str(data.note, 'nota', { optional: true, max: 200 });
+    return db.transaction(() => {
+      db.run('UPDATE products SET stock = COALESCE(stock, 0) + ? WHERE id = ?', [qty, p.id]);
+      logStock(p, 'entrada', qty, { note, actor });
+      checkLowStock(p.id);
+      return db.get('SELECT * FROM products WHERE id = ?', [p.id]);
+    });
+  }
+  function listStockMoves(actor, f = {}) {
+    requireRole(actor, 'admin');
+    const w = [`m.school_id = ${sch(actor)}`]; const prm = [];
+    if (f.product_id) { w.push('m.product_id = ?'); prm.push(int(f.product_id, 'producto', { min: 1 })); }
+    return db.all(`SELECT m.*, p.name AS product_name FROM stock_moves m JOIN products p ON p.id = m.product_id WHERE ${w.join(' AND ')} ORDER BY m.id DESC LIMIT 300`, prm);
+  }
+  function getInventorySettings(actor) {
+    requireRole(actor, 'admin', 'cajero');
+    const r = db.get('SELECT stock_block_zero FROM schools WHERE id = ?', [sch(actor)]) || {};
+    return { block_at_zero: r.stock_block_zero === undefined || r.stock_block_zero === null ? true : !!r.stock_block_zero };
+  }
+  function setInventorySettings(actor, data = {}) {
+    requireRole(actor, 'admin');
+    db.run('UPDATE schools SET stock_block_zero = ? WHERE id = ?', [data.block_at_zero ? 1 : 0, sch(actor)]);
+    return getInventorySettings(actor);
+  }
+  // ---------- avisos de la escuela (Notificaciones) ----------
+  function listSchoolNotices(actor) {
+    requireRole(actor, 'admin');
+    return db.all('SELECT * FROM school_notices WHERE school_id = ? ORDER BY id DESC LIMIT 200', [sch(actor)]).map((n) => ({ ...n, unread: !n.read_at }));
+  }
+  function markNoticesRead(actor) {
+    requireRole(actor, 'admin');
+    return { marked: db.run('UPDATE school_notices SET read_at = ? WHERE school_id = ? AND read_at IS NULL', [ts(), sch(actor)]).changes };
   }
   function productData(actor, data, prev = {}) {
     const name = data.name !== undefined ? str(data.name, 'nombre del producto', { max: 80 }) : prev.name;
@@ -382,21 +446,32 @@ function createService(db, opts = {}) {
     if (!db.get(`SELECT id FROM categories WHERE id = ?${scope(actor)}`, [category_id])) throw new AppError('Categoría no encontrada', 'NO_ENCONTRADO');
     const price_cents = data.price_cents !== undefined ? cents(data.price_cents, 'precio') : prev.price_cents;
     const active = data.active !== undefined ? (data.active ? 1 : 0) : (prev.active === undefined ? 1 : prev.active);
-    return { name, category_id, price_cents, active };
+    const stock = data.stock !== undefined ? optStock(data.stock, 'existencias (piezas)') : (prev.stock === undefined ? null : prev.stock);
+    const stock_min = data.stock_min !== undefined ? optStock(data.stock_min, 'stock mínimo') : (prev.stock_min === undefined ? null : prev.stock_min);
+    return { name, category_id, price_cents, active, stock, stock_min };
   }
   function createProduct(actor, data) {
     requireRole(actor, 'admin');
     const p = productData(actor, data);
-    const r = db.run('INSERT INTO products (school_id, name, category_id, price_cents, active, created_at) VALUES (?,?,?,?,?,?)', [sch(actor), p.name, p.category_id, p.price_cents, p.active, ts()]);
-    return db.get('SELECT * FROM products WHERE id = ?', [r.lastId]);
+    return db.transaction(() => {
+      const r = db.run('INSERT INTO products (school_id, name, category_id, price_cents, active, stock, stock_min, created_at) VALUES (?,?,?,?,?,?,?,?)', [sch(actor), p.name, p.category_id, p.price_cents, p.active, p.stock, p.stock_min, ts()]);
+      const np = db.get('SELECT * FROM products WHERE id = ?', [r.lastId]);
+      if (p.stock !== null) logStock(np, 'inicial', p.stock, { actor });
+      checkLowStock(np.id);
+      return db.get('SELECT * FROM products WHERE id = ?', [r.lastId]);
+    });
   }
   function updateProduct(actor, id, data) {
     requireRole(actor, 'admin');
     const prev = db.get(`SELECT * FROM products WHERE id = ? AND deleted_at IS NULL${scope(actor)}`, [int(id, 'id', { min: 1 })]);
     if (!prev) throw new AppError('Producto no encontrado', 'NO_ENCONTRADO');
     const p = productData(actor, data, prev);
-    db.run('UPDATE products SET name=?, category_id=?, price_cents=?, active=? WHERE id=?', [p.name, p.category_id, p.price_cents, p.active, prev.id]);
-    return db.get('SELECT * FROM products WHERE id = ?', [prev.id]);
+    return db.transaction(() => {
+      db.run('UPDATE products SET name=?, category_id=?, price_cents=?, active=?, stock=?, stock_min=? WHERE id=?', [p.name, p.category_id, p.price_cents, p.active, p.stock, p.stock_min, prev.id]);
+      if (p.stock !== prev.stock && p.stock !== null) logStock(prev, 'ajuste', p.stock - (prev.stock || 0), { actor, note: prev.stock === null ? 'Inicio de control de inventario' : 'Corrección de existencias' });
+      checkLowStock(prev.id);
+      return db.get('SELECT * FROM products WHERE id = ?', [prev.id]);
+    });
   }
   // Borrado lógico: el producto pasa a la papelera (se puede restaurar) y se oculta del punto de venta
   function deleteProduct(actor, id) {
@@ -743,6 +818,12 @@ function createService(db, opts = {}) {
       }
       // 5) Saldo
       if (k.balance_cents < total) return reject(`Saldo insuficiente: saldo ${money(k.balance_cents)}, total ${money(total)}`);
+      // 6) Existencias (solo productos con control de inventario y si la escuela bloquea la venta sin existencias)
+      const blockZero = (db.get('SELECT stock_block_zero FROM schools WHERE id = ?', [k.school_id]) || { stock_block_zero: 1 }).stock_block_zero !== 0;
+      if (blockZero) {
+        const out = lines.find((l) => l.product.stock !== null && l.product.stock < l.qty);
+        if (out) return reject(out.product.stock <= 0 ? `Sin existencias: ${out.product.name}` : `Existencias insuficientes: ${out.product.name} (quedan ${out.product.stock})`);
+      }
 
       // Aprobar: actualización condicional (defensa extra contra carreras)
       const upd = db.run('UPDATE cards SET balance_cents = balance_cents - ? WHERE id = ? AND balance_cents >= ? AND status = \'activa\'', [total, k.id, total]);
@@ -753,6 +834,13 @@ function createService(db, opts = {}) {
       for (const l of lines) {
         db.run(`INSERT INTO transaction_items (transaction_id, product_id, product_name, category_name, qty, unit_price_cents, subtotal_cents)
           VALUES (?,?,?,?,?,?,?)`, [r.lastId, l.product.id, l.product.name, l.product.category_name, l.qty, l.product.price_cents, l.subtotal]);
+        if (l.product.stock !== null) {
+          // descuento atómico dentro de la misma transacción de la venta
+          const su = db.run(`UPDATE products SET stock = stock - ? WHERE id = ? AND stock IS NOT NULL${blockZero ? ' AND stock >= ?' : ''}`, blockZero ? [l.qty, l.product.id, l.qty] : [l.qty, l.product.id]);
+          if (su.changes !== 1) throw new AppError('Existencias insuficientes, intenta de nuevo', 'CONFLICTO');
+          logStock(l.product, 'venta', -l.qty, { transaction_id: r.lastId, actor });
+          checkLowStock(l.product.id);
+        }
       }
       return { ok: true, transaction_id: r.lastId, total_cents: total, balance_cents: newBal, child_name: child.full_name };
     });
@@ -804,6 +892,113 @@ function createService(db, opts = {}) {
     };
   }
 
+  // ---------- cancelar venta (devuelve el saldo y regresa las piezas al inventario) ----------
+  function reverseSale(actor, data = {}) {
+    requireRole(actor, 'admin');
+    const reason = str(data.reason, 'motivo de la cancelación', { max: 200 });
+    return db.transaction(() => {
+      const t = db.get(`SELECT * FROM transactions WHERE id = ?${scope(actor)}`, [int(data.transaction_id, 'venta', { min: 1 })]);
+      if (!t || t.type !== 'compra') throw new AppError('Venta no encontrada', 'NO_ENCONTRADO');
+      if (t.status !== 'aprobado') throw new AppError('Solo se pueden cancelar ventas aprobadas', 'VALIDACION');
+      if (t.reversed_at) throw new AppError('Esta venta ya fue cancelada', 'CONFLICTO');
+      const k = db.get('SELECT * FROM cards WHERE id = ?', [t.card_id]);
+      if (!k) throw new AppError('Tarjeta no encontrada', 'NO_ENCONTRADO');
+      const nb = k.balance_cents + t.amount_cents;
+      db.run('UPDATE cards SET balance_cents = ? WHERE id = ?', [nb, k.id]);
+      const x = db.run(`INSERT INTO transactions (school_id,type,status,amount_cents,balance_after_cents,card_id,card_uid,child_id,user_id,note,created_at)
+        VALUES (?,'ajuste','aprobado',?,?,?,?,?,?,?,?)`, [t.school_id, t.amount_cents, nb, k.id, k.uid, t.child_id, actor.id, `Cancelación de venta #${t.id}: ${reason}`, ts()]);
+      db.run('UPDATE transactions SET reversed_at = ?, reversed_by = ? WHERE id = ?', [ts(), actor.full_name || actor.username || null, t.id]);
+      for (const it of db.all('SELECT * FROM transaction_items WHERE transaction_id = ?', [t.id])) {
+        const p = it.product_id ? db.get('SELECT * FROM products WHERE id = ?', [it.product_id]) : null;
+        if (p && p.stock !== null) {
+          db.run('UPDATE products SET stock = stock + ? WHERE id = ?', [it.qty, p.id]);
+          logStock(p, 'cancelacion', it.qty, { transaction_id: t.id, actor, note: reason });
+          checkLowStock(p.id);
+        }
+      }
+      return { reversal_id: x.lastId, balance_cents: nb, transaction_id: t.id };
+    });
+  }
+
+  // ---------- reportes (rango de fechas) ----------
+  const YMD = /^\d{4}-\d{2}-\d{2}$/;
+  function report(actor, f = {}) {
+    requireRole(actor, 'admin', 'cajero');
+    const sid = sch(actor);
+    let from = f.from; let to = f.to; let userId = null;
+    // El cajero solo ve su "Corte del día" (sus ventas de hoy)
+    if (actor.role === 'cajero') { from = to = fmtDate(now()); userId = actor.id; }
+    if (!from) from = fmtDate(now()); if (!to) to = from;
+    if (!YMD.test(from) || !YMD.test(to)) throw new AppError('Fechas inválidas (AAAA-MM-DD)', 'VALIDACION');
+    if (from > to) throw new AppError('La fecha inicial es posterior a la final', 'VALIDACION');
+    const a = from + ' 00:00:00'; const b = to + ' 23:59:59';
+    const U = userId ? ` AND t.user_id = ${Number(userId)}` : '';
+    const W = ` AND t.school_id = ${Number(sid)} AND t.created_at >= ? AND t.created_at <= ?${U}`;
+    const SALE = `t.type='compra' AND t.status='aprobado' AND t.reversed_at IS NULL`;
+    const sales = db.get(`SELECT COALESCE(SUM(amount_cents),0) AS s, COUNT(*) AS n FROM transactions t WHERE ${SALE}${W}`, [a, b]);
+    const rech = db.get(`SELECT COALESCE(SUM(amount_cents),0) AS s, COUNT(*) AS n FROM transactions t WHERE t.type='recarga' AND t.status='aprobado'${W}`, [a, b]);
+    const rej = db.get(`SELECT COALESCE(SUM(amount_cents),0) AS s, COUNT(*) AS n FROM transactions t WHERE t.type='compra' AND t.status='rechazado'${W}`, [a, b]);
+    const canc = db.get(`SELECT COALESCE(SUM(amount_cents),0) AS s, COUNT(*) AS n FROM transactions t WHERE t.type='compra' AND t.reversed_at IS NOT NULL${W}`, [a, b]);
+    const byDayRows = db.all(`SELECT substr(t.created_at,1,10) AS date, SUM(amount_cents) AS total_cents, COUNT(*) AS n FROM transactions t WHERE ${SALE}${W} GROUP BY 1`, [a, b]);
+    const map = new Map(byDayRows.map((r) => [r.date, r]));
+    const days = [];
+    const d0 = new Date(from + 'T12:00:00'); const d1 = new Date(to + 'T12:00:00');
+    for (let d = new Date(d0), i = 0; d <= d1 && i < 400; d.setDate(d.getDate() + 1), i++) { const k = fmtDate(d); const r = map.get(k); days.push({ date: k, total_cents: r ? r.total_cents : 0, count: r ? r.n : 0 }); }
+    const top = db.all(`SELECT ti.product_name AS name, SUM(ti.qty) AS qty, SUM(ti.subtotal_cents) AS total_cents FROM transaction_items ti JOIN transactions t ON t.id = ti.transaction_id
+      WHERE ${SALE}${W} GROUP BY ti.product_name ORDER BY qty DESC, total_cents DESC LIMIT 10`, [a, b]);
+    const byCashier = db.all(`SELECT COALESCE(u.full_name, t.processed_by_name, 'Sin nombre') AS name, COUNT(*) AS count, SUM(t.amount_cents) AS total_cents FROM transactions t LEFT JOIN users u ON u.id = t.user_id
+      WHERE ${SALE}${W} GROUP BY 1 ORDER BY total_cents DESC`, [a, b]);
+    const rejected = db.all(`SELECT t.id, t.created_at, t.reason, t.amount_cents, ch.full_name AS child_name FROM transactions t LEFT JOIN children ch ON ch.id = t.child_id
+      WHERE t.type='compra' AND t.status='rechazado'${W} ORDER BY t.id DESC LIMIT 50`, [a, b]);
+    return {
+      school_name: schoolName(sid), from, to, only_cashier: userId ? (actor.full_name || actor.username) : null, generated_at: ts(),
+      sales_cents: sales.s, sales_count: sales.n, avg_ticket_cents: sales.n ? Math.round(sales.s / sales.n) : 0,
+      recharges_cents: rech.s, recharges_count: rech.n, rejected_count: rej.n, rejected_cents: rej.s, cancelled_count: canc.n, cancelled_cents: canc.s,
+      sales_by_day: days, top_products: top, by_cashier: byCashier, rejected,
+    };
+  }
+
+  // ---------- preferencias de notificaciones del tutor ----------
+  const PREF_DEFAULT = { purchases: true, rejected: true, low_balance: true, low_balance_cents: 5000 };
+  function getPushPrefsRaw(userId) {
+    const r = db.get('SELECT * FROM push_prefs WHERE user_id = ?', [userId]);
+    return r ? { purchases: !!r.purchases, rejected: !!r.rejected, low_balance: !!r.low_balance, low_balance_cents: r.low_balance_cents } : { ...PREF_DEFAULT };
+  }
+  function getPushPrefs(actor) {
+    requireRole(actor, 'tutor');
+    return { ...getPushPrefsRaw(actor.id), subscriptions: db.get('SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?', [actor.id]).n };
+  }
+  function setPushPrefs(actor, data = {}) {
+    requireRole(actor, 'tutor');
+    const cur = getPushPrefsRaw(actor.id);
+    const b = (v, d) => (v === undefined ? d : !!v);
+    const th = data.low_balance_cents === undefined ? cur.low_balance_cents : int(data.low_balance_cents, 'saldo mínimo', { min: 100, max: 1000000 });
+    const n = { purchases: b(data.purchases, cur.purchases), rejected: b(data.rejected, cur.rejected), low_balance: b(data.low_balance, cur.low_balance), low_balance_cents: th };
+    db.run(`INSERT INTO push_prefs (user_id, purchases, rejected, low_balance, low_balance_cents, updated_at) VALUES (?,?,?,?,?,?)
+      ON CONFLICT(user_id) DO UPDATE SET purchases=excluded.purchases, rejected=excluded.rejected, low_balance=excluded.low_balance, low_balance_cents=excluded.low_balance_cents, updated_at=excluded.updated_at`,
+    [actor.id, n.purchases ? 1 : 0, n.rejected ? 1 : 0, n.low_balance ? 1 : 0, n.low_balance_cents, ts()]);
+    if (th !== cur.low_balance_cents) db.run('DELETE FROM low_balance_state WHERE child_id IN (SELECT id FROM children WHERE tutor_id = ?)', [actor.id]);
+    return getPushPrefs(actor);
+  }
+  function pushSubscribe(actor, data = {}) {
+    requireRole(actor, 'tutor');
+    const sub = data.subscription || data;
+    const endpoint = str(sub.endpoint, 'endpoint', { max: 1000 });
+    if (!/^https:\/\//.test(endpoint)) throw new AppError('Suscripción inválida', 'VALIDACION');
+    const keys = sub.keys || {};
+    const p256dh = str(keys.p256dh, 'clave p256dh', { max: 200 }); const auth = str(keys.auth, 'clave auth', { max: 100 });
+    if (db.get('SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?', [actor.id]).n >= 10) db.run('DELETE FROM push_subscriptions WHERE id = (SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY id LIMIT 1)', [actor.id]);
+    db.run(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent, created_at) VALUES (?,?,?,?,?,?)
+      ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id, p256dh=excluded.p256dh, auth=excluded.auth, failures=0`, [actor.id, endpoint, p256dh, auth, str(data.user_agent, 'ua', { optional: true, max: 300 }), ts()]);
+    return getPushPrefs(actor);
+  }
+  function pushUnsubscribe(actor, data = {}) {
+    requireRole(actor, 'tutor');
+    if (data.endpoint) db.run('DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?', [actor.id, String(data.endpoint)]);
+    else db.run('DELETE FROM push_subscriptions WHERE user_id = ?', [actor.id]);
+    return getPushPrefs(actor);
+  }
+
   // ---------- dashboard ----------
   function dashboard(actor) {
     requireRole(actor, 'admin');
@@ -839,6 +1034,8 @@ function createService(db, opts = {}) {
     login, assertSchoolActive, findUserByIdentifier, publicUser, changePassword, createUser, updateUser, listUsers,
     listChildren, createChild, updateChild,
     requestChildChange, listChangeRequests, changeRequestsUnread, markChangeRequestsRead, resolveChangeRequest,
+    addStock, listStockMoves, getInventorySettings, setInventorySettings, listSchoolNotices, markNoticesRead, checkLowStock,
+    reverseSale, report, getPushPrefs, getPushPrefsRaw, setPushPrefs, pushSubscribe, pushUnsubscribe,
     listCategories, createCategory, listProducts, createProduct, updateProduct, deleteProduct,
     listCards, registerCard, assignCard, assignCardByUid, unassignCard, setCardStatus, reportLostAndReplace, lookupCard,
     getLimits, setLimits, getProhibitions, setProhibitions,

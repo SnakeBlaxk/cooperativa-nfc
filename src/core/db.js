@@ -259,6 +259,61 @@ CREATE TABLE IF NOT EXISTS child_change_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_ccr_school ON child_change_requests(school_id, status, id);
 CREATE INDEX IF NOT EXISTS idx_ccr_child ON child_change_requests(child_id, id);
+-- Notificaciones push (Web Push) de los padres: una fila por navegador/teléfono suscrito
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TEXT NOT NULL,
+  last_ok_at TEXT,
+  failures INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+-- Preferencias de avisos del tutor (qué avisos quiere y el umbral de saldo bajo)
+CREATE TABLE IF NOT EXISTS push_prefs (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  purchases INTEGER NOT NULL DEFAULT 1,
+  rejected INTEGER NOT NULL DEFAULT 1,
+  low_balance INTEGER NOT NULL DEFAULT 1,
+  low_balance_cents INTEGER NOT NULL DEFAULT 5000,
+  updated_at TEXT
+);
+-- Saldo bajo ya avisado (una vez por cruce del umbral) por alumno
+CREATE TABLE IF NOT EXISTS low_balance_state (
+  child_id INTEGER PRIMARY KEY REFERENCES children(id),
+  notified INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT
+);
+-- Inventario: entradas y movimientos de existencias (bitácora)
+CREATE TABLE IF NOT EXISTS stock_moves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  school_id INTEGER REFERENCES schools(id),
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  kind TEXT NOT NULL,
+  qty INTEGER NOT NULL,
+  stock_after INTEGER,
+  note TEXT,
+  transaction_id INTEGER,
+  user_id INTEGER,
+  user_name TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stock_moves ON stock_moves(product_id, id);
+-- Avisos para la escuela (p. ej. inventario por agotarse) en su sección Notificaciones
+CREATE TABLE IF NOT EXISTS school_notices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  school_id INTEGER REFERENCES schools(id),
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL,
+  ref_type TEXT,
+  ref_id INTEGER,
+  created_at TEXT NOT NULL,
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_school_notices ON school_notices(school_id, id);
 `;
 
 const SYNC_TABLES = ['users', 'categories', 'products', 'children', 'cards', 'transactions'];
@@ -328,6 +383,13 @@ class Database {
     // puede quedar obligado a cambiarla (se quedaría sin poder entrar).
     this.db.exec("UPDATE users SET must_change_password = 0 WHERE role <> 'superadmin' AND must_change_password <> 0");
     add('transactions', 'flag', 'TEXT');
+    // v2.1: inventario (en blanco = sin control), venta cancelada y bloqueo de venta sin existencias
+    add('products', 'stock', 'INTEGER');
+    add('products', 'stock_min', 'INTEGER');
+    add('products', 'low_notified', 'INTEGER NOT NULL DEFAULT 0');
+    add('transactions', 'reversed_at', 'TEXT');
+    add('transactions', 'reversed_by', 'TEXT');
+    add('schools', 'stock_block_zero', 'INTEGER NOT NULL DEFAULT 1');
     add('transactions', 'flag_note', 'TEXT');
     for (const t of ['users', 'children', 'cards', 'categories', 'products', 'transactions', 'devices', 'sync_changes']) add(t, 'school_id', 'INTEGER');
     // Identificador global (UUID de 128 bits) para sincronizar sin depender de los id locales

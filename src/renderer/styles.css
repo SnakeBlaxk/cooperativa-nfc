@@ -209,3 +209,10 @@ code { font-family: Consolas, "Courier New", monospace; background: #f1f4f9; pad
 }
 @media (max-width: 640px) { table.resp-md tr { grid-template-columns: 1fr; } }
 tr.unread td { background: #f3f7ff; } .cr-table td { vertical-align: top; } input[data-readonly] { background: #f4f5f7; color: var(--text, #222); cursor: not-allowed; }
+/* v2.1: inventario, avisos y reportes */
+.count-pill { margin-left: 6px; background: var(--warn); color: #fff; border-radius: 99px; font-size: .8rem; padding: 1px 8px; font-weight: 700; }
+tr.low td { background: #fffaf0; }
+.notice-list { display: grid; gap: 8px; margin-top: 12px; }
+.notice { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fafbfd; }
+.notice.unread { background: var(--warn-bg); border-color: #f5d29a; }
+.push-card .check { font-weight: 500; }

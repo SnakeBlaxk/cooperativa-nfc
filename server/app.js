@@ -13,6 +13,7 @@ const { createPlatform } = require('../src/core/platform');
 const { createSyncServer } = require('../src/core/sync-server');
 const { createSecurity } = require('../src/core/security');
 const { createBilling } = require('../src/core/billing');
+const { createPush } = require('../src/core/push');
 
 // Métodos que, con una caja VIEJA sincronizada (solo si LEGACY_SYNC=1), se hacían solo en el escritorio.
 // En el modo normal (solo en línea) el servidor es la única fuente de verdad y estos métodos se usan desde
@@ -63,6 +64,8 @@ async function createServer(opts = {}) {
   }
   const auth = createAuth(db, svc, { jwtSecret: secret, mailer: opts.mailer || consoleMailer(), appUrl: opts.appUrl || process.env.APP_URL, onChildLinked: (id) => sync.recordChild('child_link', id), security, billing, ...(opts.authOptions || {}) });
 
+  // Notificaciones Web Push para padres (opts.pushSender permite simular el envío en pruebas)
+  const push = createPush(db, { svc, sender: opts.pushSender, env: opts.env || process.env });
   const platform = createPlatform(db, { svc, sync, auth, security, billing });
   // Revisión periódica de mensualidades (alertas y pausas aunque nadie entre). También al arrancar.
   try { billing.sweep(); } catch (e) { console.error('[mensualidad]', e); }
@@ -104,6 +107,10 @@ async function createServer(opts = {}) {
 
   // ----- salud -----
   app.get('/api/health', (req, res) => res.json({ ok: true, data: { status: 'ok', time: new Date().toISOString(), persistence: persistence().mode } }));
+
+  // ----- notificaciones push (llave pública VAPID para suscribirse) -----
+  app.get('/api/push/key', (req, res) => res.json({ ok: true, data: { publicKey: push.publicKey } }));
+  app.post('/api/push/test', authenticate(), requireRole('tutor'), (req, res) => send(res, async () => ({ sent: await push.test(req.user.id) })));
 
   // ----- autenticación -----
   app.post('/api/auth/login', (req, res) => send(res, () => auth.login(req.body.identifier || req.body.username, req.body.password, ctx(req))));
@@ -231,6 +238,14 @@ async function createServer(opts = {}) {
         }
         if (method === 'deleteProduct') security.alert({ school_id: req.user.school_id, kind: 'borrado', severity: 'baja', message: `${req.user.full_name} envió a la papelera el producto "${r.data.product ? r.data.product.name : args.id}".`, ref_type: 'product', ref_id: Number(args.id) });
         if (method === 'recharge' && r.data.transaction_id) security.inspectRecharge(r.data.transaction_id);
+        // Avisos push a los padres (no bloquean la respuesta de la caja)
+        if (method === 'purchase' && r.data.transaction_id) push.onPurchase(r.data.transaction_id);
+        if (['recharge', 'adjust', 'reverseSale'].includes(method)) {
+          const tx = db.get('SELECT child_id FROM transactions WHERE id = ?', [r.data.transaction_id || r.data.reversal_id || 0]);
+          if (tx) push.onBalanceChange(tx.child_id);
+        }
+        if (method === 'reverseSale') security.audit(req.user, 'venta_cancelada', { ip: req.ip, target_type: 'transaction', target_id: args.transaction_id, details: { motivo: args.reason, saldo_nuevo: r.data.balance_cents }, severity: 'aviso' });
+        if (method === 'addStock') security.audit(req.user, 'inventario_entrada', { ip: req.ip, target_type: 'product', target_id: args.product_id, details: { piezas: args.qty, nota: args.note || undefined, existencias: r.data.stock } });
       } catch (e) { console.error('[seguridad]', e); }
       return res.json(r);
     }
@@ -260,6 +275,6 @@ async function createServer(opts = {}) {
   app.use(express.static(renderer, { index: false }));
   app.use('/api', (req, res) => res.status(404).json({ ok: false, error: 'Ruta no encontrada', code: 'NO_ENCONTRADO' }));
 
-  return { app, db, svc, auth, sync, platform, billing, security };
+  return { app, db, svc, auth, sync, platform, billing, security, push };
 }
 module.exports = { createServer };

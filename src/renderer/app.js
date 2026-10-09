@@ -131,9 +131,9 @@
     admin: [['Inicio', [['dashboard', 'Resumen', '📊'], ['notificaciones', 'Notificaciones', '📬']]],
       ['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵']]],
       ['Escuela', [['alumnos', 'Alumnos y padres', '🧒'], ['tarjetas', 'Tarjetas', '🪪'], ['programar', 'Programar tarjetas', '📶'], ['productos', 'Productos', '🍎']]],
-      ['Reportes', [['movimientos', 'Movimientos', '🧾']]],
+      ['Reportes', [['reportes', 'Reportes', '📈'], ['movimientos', 'Movimientos', '🧾']]],
       ['Configuración', [['usuarios', 'Personal', '👥'], ['ajustes', 'Ajustes', '⚙️']]]],
-    cajero: [['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵'], ['movimientos', 'Movimientos', '🧾']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
+    cajero: [['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵'], ['movimientos', 'Movimientos', '🧾'], ['corte', 'Corte del día', '🧮']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
     tutor: [['Mi familia', [['hijos', 'Mis hijos', '🧒'], ['movimientos', 'Historial', '🧾']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
   };
   const navItems = (role) => NAV[role].flatMap(([, items]) => items);
@@ -210,14 +210,16 @@
   }
   function refreshNotifCount() {
     window.coop.call('changeRequestsUnread').then((r) => {
-      const n = r && r.ok ? r.data.unread : 0;
+      const n = r && r.ok ? r.data.unread + (r.data.notices || 0) : 0;
       state.notifCount = n; setNavCount('notificaciones', n);
     }).catch(() => {});
   }
   let cleanups = [];
   function onCleanup(fn) { cleanups.push(fn); }
   function teardown() { cleanups.forEach((f) => { try { f(); } catch (_) { /* */ } }); cleanups = []; }
-  async function logout() { await window.coop.call('logout'); state.user = null; state.view = null; render(); }
+  async function logout() {
+    if (WEB && state.user && state.user.role === 'tutor' && typeof currentPushSub === 'function') { try { const sb = await currentPushSub(); if (sb) { await window.coop.call('pushUnsubscribe', { endpoint: sb.endpoint }); await sb.unsubscribe(); } } catch (_) { /* nada */ } }
+    await window.coop.call('logout'); state.user = null; state.view = null; render(); }
 
   // ---------- mensualidad: avisos para administrador y cajero (los padres no los ven) ----------
   const ddmmyyyy = (s) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : '');
@@ -377,6 +379,7 @@
       const r = mk('rect', { x, y: pad.t + ih - bh, width: bw * 0.7, height: Math.max(bh, 0), rx: 4, fill: '#2f6fec' });
       const t = document.createElementNS(NS, 'title'); t.textContent = `${d.date}: ${money(d.total_cents)}`; r.appendChild(t);
       const [, m, dd] = d.date.split('-');
+      if (i % Math.ceil(data.length / 16) !== 0) return;
       mk('text', { x: x + bw * 0.35, y: H - pad.b + 14, 'text-anchor': 'middle' }, `${dd}/${m}`);
     });
     return svg;
@@ -530,21 +533,43 @@
   };
 
   // ----- Productos -----
-  VIEWS.productos = async (main) => {
-    const [products, categories] = await Promise.all([call('listProducts'), call('listCategories')]);
+  VIEWS.productos = async (main, params) => {
+    const filter = params.f || 'todos';
+    const [products, categories, inv] = await Promise.all([call('listProducts'), call('listCategories'), call('getInventorySettings')]);
+    const lowCount = products.filter((p) => p.low_stock).length;
+    const shown = filter === 'agotarse' ? products.filter((p) => p.low_stock) : products;
     const edit = (p) => {
       const name = h('input', { value: p ? p.name : '' });
       const cat = h('select', null, categories.map((c) => h('option', { value: c.id, selected: p && p.category_id === c.id }, c.name)));
       const price = h('input', { value: p ? centsToInput(p.price_cents) : '', placeholder: '0.00' });
       const active = h('input', { type: 'checkbox', checked: p ? p.active : true });
-      modal(p ? 'Editar producto' : 'Nuevo producto', h('div', { class: 'form' }, field('Nombre', name), field('Categoría', cat), field('Precio (MXN)', price), h('label', { class: 'check' }, active, 'Activo (visible en punto de venta)')),
-        [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
-          try {
-            const data = { name: name.value, category_id: Number(cat.value), price_cents: parseMoney(price.value), active: active.checked };
-            if (p) await call('updateProduct', { id: p.id, ...data }); else await call('createProduct', data);
-            toast('Producto guardado', 'ok'); render();
-          } catch (e) { toast(e.message, 'err'); return false; }
+      const stock = h('input', { value: p && p.stock !== null && p.stock !== undefined ? String(p.stock) : '', placeholder: 'En blanco = sin control', inputmode: 'numeric' });
+      const smin = h('input', { value: p && p.stock_min !== null && p.stock_min !== undefined ? String(p.stock_min) : '', placeholder: 'Opcional', inputmode: 'numeric' });
+      modal(p ? 'Editar producto' : 'Nuevo producto', h('div', { class: 'form' }, field('Nombre', name), field('Categoría', cat), field('Precio (MXN)', price),
+        h('div', { class: 'grid g2' }, field('Existencias (piezas)', stock, p && p.stock !== null ? 'Para sumar mercancía use "Entrada".' : 'Déjelo en blanco si no quiere llevar inventario.'), field('Stock mínimo', smin, 'Le avisamos cuando queden esas piezas o menos.')),
+        h('label', { class: 'check' }, active, 'Activo (visible en punto de venta)')),
+      [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
+        try {
+          const data = { name: name.value, category_id: Number(cat.value), price_cents: parseMoney(price.value), active: active.checked, stock: stock.value.trim(), stock_min: smin.value.trim() };
+          if (p) await call('updateProduct', { id: p.id, ...data }); else await call('createProduct', data);
+          toast('Producto guardado', 'ok'); render();
+        } catch (e) { toast(e.message, 'err'); return false; }
+      } }]);
+    };
+    const entrada = (p) => {
+      const qty = h('input', { inputmode: 'numeric', placeholder: 'p. ej. 24' }); const note = h('input', { placeholder: 'Opcional: proveedor, factura…' });
+      modal('Entrada de mercancía — ' + p.name, h('div', { class: 'form' }, h('p', { class: 'small muted' }, `Existencias actuales: ${p.stock === null ? 'sin control (empieza en 0)' : p.stock + ' piezas'}`), field('Piezas que llegaron', qty), field('Nota', note)),
+        [{ label: 'Cancelar' }, { label: 'Agregar', class: 'primary', onClick: async () => {
+          const r = await safe(() => call('addStock', { product_id: p.id, qty: Number(qty.value), note: note.value }));
+          if (!r) return false; toast(`Entrada registrada: ${r.name} ahora tiene ${r.stock} piezas`, 'ok'); render();
         } }]);
+    };
+    const historial = async () => {
+      const mv = await safe(() => call('listStockMoves', {})); if (!mv) return;
+      const KIND = { entrada: 'Entrada', venta: 'Venta', cancelacion: 'Venta cancelada', inicial: 'Inicial', ajuste: 'Ajuste' };
+      modal('Movimientos de inventario', h('div', { class: 'tablewrap', style: { maxHeight: '60vh', overflow: 'auto' } }, mv.length ? h('table', null, h('tr', null, ['Fecha', 'Producto', 'Tipo', 'Piezas', 'Quedan', 'Quién / nota'].map((x) => h('th', null, x))),
+        mv.map((m) => h('tr', null, h('td', null, fmtDate(m.created_at)), h('td', null, m.product_name), h('td', null, KIND[m.kind] || m.kind), h('td', { class: 'right', style: { color: m.qty < 0 ? 'var(--err)' : 'var(--ok)' } }, (m.qty > 0 ? '+' : '') + m.qty),
+          h('td', { class: 'right' }, m.stock_after), h('td', { class: 'small' }, [m.user_name, m.note].filter(Boolean).join(' · '))))) : h('div', { class: 'empty' }, 'Aún no hay movimientos')));
     };
     const newCat = () => {
       const n = h('input', { placeholder: 'p. ej. Lácteos' });
@@ -557,14 +582,27 @@
       const r = await safe(() => call('deleteProduct', { id: p.id }));
       if (r) { toast(r.message || 'Producto eliminado', 'ok'); render(); }
     };
-    put(main, pageHead('Productos', 'Lo que se vende en la tiendita. Los productos desactivados no aparecen al cobrar.',
-      h('button', { class: 'btn', onclick: newCat }, '+ Categoría'), h('button', { class: 'btn primary', onclick: () => edit(null) }, '+ Nuevo producto')),
-    h('div', { class: 'card tablewrap' }, h('table', null, h('tr', null, h('th', null, 'Producto'), h('th', null, 'Categoría'), h('th', { class: 'right' }, 'Precio'), h('th', null, 'Estado'), h('th', null, '')),
-      products.map((p) => h('tr', null, h('td', null, p.name), h('td', null, p.category_name), h('td', { class: 'right' }, money(p.price_cents)),
+    const block = h('input', { type: 'checkbox', checked: inv.block_at_zero, onchange: async (e) => { const r = await safe(() => call('setInventorySettings', { block_at_zero: e.target.checked })); if (r) toast(r.block_at_zero ? 'Se bloqueará la venta de productos sin existencias' : 'Se permitirá vender aunque no haya existencias', 'ok'); } });
+    const stockCell = (p) => {
+      if (p.stock === null || p.stock === undefined) return h('span', { class: 'small muted' }, 'Sin control');
+      return h('span', null, h('b', { style: { color: p.stock <= 0 ? 'var(--err)' : (p.low_stock ? 'var(--warn)' : '') } }, String(p.stock)), ' pzas',
+        p.stock_min !== null ? h('div', { class: 'small muted' }, 'Mínimo ' + p.stock_min) : null,
+        p.low_stock ? h('div', null, badge(p.stock <= 0 ? 'agotado' : 'por agotarse', p.stock <= 0 ? 'err' : 'warn')) : null);
+    };
+    const tabs = h('div', { class: 'tabs' }, h('button', { class: 'btn' + (filter === 'todos' ? ' active' : ''), onclick: () => go('productos', {}) }, 'Todos'),
+      h('button', { class: 'btn' + (filter === 'agotarse' ? ' active' : ''), 'data-filter': 'agotarse', onclick: () => go('productos', { f: 'agotarse' }) }, '⚠️ Por agotarse', lowCount ? h('span', { class: 'count-pill' }, String(lowCount)) : null),
+      h('label', { class: 'check', style: { marginLeft: 'auto' } }, block, 'No vender si no hay existencias'));
+    put(main, pageHead('Productos', 'Lo que se vende en la tiendita. Los productos desactivados no aparecen al cobrar. Ponga existencias para llevar inventario (opcional).',
+      h('button', { class: 'btn', onclick: historial }, '📋 Movimientos de inventario'), h('button', { class: 'btn', onclick: newCat }, '+ Categoría'), h('button', { class: 'btn primary', onclick: () => edit(null) }, '+ Nuevo producto')),
+    tabs,
+    h('div', { class: 'card tablewrap' }, shown.length ? h('table', null, h('tr', null, h('th', null, 'Producto'), h('th', null, 'Categoría'), h('th', { class: 'right' }, 'Precio'), h('th', null, 'Existencias'), h('th', null, 'Estado'), h('th', null, '')),
+      shown.map((p) => h('tr', { 'data-product': p.id, class: p.low_stock ? 'low' : '' }, h('td', null, p.name), h('td', null, p.category_name), h('td', { class: 'right' }, money(p.price_cents)),
+        h('td', null, stockCell(p)),
         h('td', null, p.active ? badge('activo', 'ok') : badge('inactivo', '')),
-        h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => edit(p) }, 'Editar'), ' ',
+        h('td', { class: 'right', style: { whiteSpace: 'nowrap' } }, h('button', { class: 'btn sm ok', onclick: () => entrada(p) }, '+ Entrada'), ' ', h('button', { class: 'btn sm', onclick: () => edit(p) }, 'Editar'), ' ',
           h('button', { class: 'btn sm', onclick: async () => { await safe(() => call('updateProduct', { id: p.id, active: !p.active })); render(); } }, p.active ? 'Desactivar' : 'Activar'), ' ',
-          h('button', { class: 'btn sm danger', onclick: () => del(p) }, 'Eliminar')))))));
+          h('button', { class: 'btn sm danger', onclick: () => del(p) }, 'Eliminar')))))
+      : h('div', { class: 'empty' }, filter === 'agotarse' ? 'Ningún producto está por agotarse. 👍' : 'Sin productos')));
   };
 
   // ----- Tarjetas -----
@@ -731,7 +769,15 @@
       const f = { from: from.value || undefined, to: to.value || undefined, type: type.value || undefined, status: status.value || undefined, child_id: child.value ? Number(child.value) : undefined, uid: uid && uid.value ? uid.value : undefined, limit: 1000 };
       const r = await safe(() => call('listMovements', f)); if (!r) return; rows = r;
       box.innerHTML = '';
-      box.appendChild(movTable(rows, { showUser: !isTutor }));
+      box.appendChild(movTable(rows, { showUser: !isTutor, onReverse: state.user.role === 'admin' ? reverse : null }));
+    }
+    function reverse(m) {
+      const why = h('input', { placeholder: 'p. ej. Se cobró dos veces' });
+      modal('Cancelar venta', h('div', { class: 'form' }, h('p', null, `Se devolverán ${money(m.amount_cents)} a la tarjeta de ${m.child_name || m.card_uid} y las piezas regresarán al inventario.`), field('Motivo', why)),
+        [{ label: 'No cancelar' }, { label: 'Cancelar venta', class: 'danger', onClick: async () => {
+          const r = await safe(() => call('reverseSale', { transaction_id: m.id, reason: why.value })); if (!r) return false;
+          toast(`Venta cancelada. Saldo nuevo: ${money(r.balance_cents)}`, 'ok'); load();
+        } }]);
     }
     function exportCsv() {
       const esc = (v) => '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"';
@@ -747,9 +793,9 @@
       box);
     load();
   };
-  function movTable(rows, { showUser = true, showChild = true } = {}) {
+  function movTable(rows, { showUser = true, showChild = true, onReverse = null } = {}) {
     if (!rows.length) return h('div', { class: 'empty' }, 'Sin movimientos');
-    return h('table', null, h('tr', null, h('th', null, 'Fecha'), showChild ? h('th', null, 'Alumno') : null, h('th', null, 'Tipo'), h('th', null, 'Detalle'), h('th', null, 'Estado'), h('th', { class: 'right' }, 'Monto'), h('th', { class: 'right' }, 'Saldo'), showUser ? h('th', null, 'Atendió') : null),
+    return h('table', null, h('tr', null, h('th', null, 'Fecha'), showChild ? h('th', null, 'Alumno') : null, h('th', null, 'Tipo'), h('th', null, 'Detalle'), h('th', null, 'Estado'), h('th', { class: 'right' }, 'Monto'), h('th', { class: 'right' }, 'Saldo'), showUser ? h('th', null, 'Atendió') : null, onReverse ? h('th', null, '') : null),
       rows.map((m) => h('tr', null, h('td', null, fmtDate(m.created_at)), showChild ? h('td', null, m.child_name || '—') : null, h('td', null, badge(m.type, m.type === 'recarga' ? 'recarga' : '')),
         h('td', null, m.items.length ? h('div', { class: 'items-list' }, m.items.map((i) => `${i.qty}× ${i.product_name}`).join(', ')) : h('span', { class: 'items-list' }, m.note || ''),
           m.reason ? h('div', { class: 'small', style: { color: 'var(--err)' } }, m.reason) : null),
@@ -757,7 +803,226 @@
         h('td', { class: 'right', style: { color: m.status === 'rechazado' ? 'var(--muted)' : (m.type === 'compra' || m.amount_cents < 0 ? 'var(--err)' : 'var(--ok)'), textDecoration: m.status === 'rechazado' ? 'line-through' : '' } },
           (m.type === 'compra' ? '−' : (m.amount_cents < 0 ? '' : '+')) + money(Math.abs(m.amount_cents)).replace('-', '−')),
         h('td', { class: 'right' }, m.balance_after_cents === null ? '' : money(m.balance_after_cents)),
-        showUser ? h('td', { class: 'small' }, m.user_name || '') : null)));
+        showUser ? h('td', { class: 'small' }, m.user_name || '') : null,
+        onReverse ? h('td', null, m.type === 'compra' && m.status === 'aprobado' ? (m.reversed_at ? badge('cancelada', 'warn') : h('button', { class: 'btn sm', onclick: () => onReverse(m) }, 'Cancelar venta')) : null) : null)));
+  }
+
+  // ======================================================================
+  // ----- Reportes (administrador) y Corte del día (cajero) -----
+  // ======================================================================
+  const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const ddmm = (s) => `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`;
+  function presetRange(k) {
+    const n = new Date(); const t = ymdLocal(n);
+    if (k === 'semana') { const s = new Date(n); s.setDate(s.getDate() - ((s.getDay() + 6) % 7)); return { from: ymdLocal(s), to: t }; }
+    if (k === 'mes') return { from: ymdLocal(new Date(n.getFullYear(), n.getMonth(), 1)), to: t };
+    return { from: t, to: t };
+  }
+  const rangeText = (r) => (r.from === r.to ? ddmm(r.from) : `${ddmm(r.from)} al ${ddmm(r.to)}`);
+  const reportTitle = (r, corte) => (corte ? 'Corte del día' : 'Reporte de ventas');
+  // Dibuja el reporte en un lienzo blanco (tamaño carta/A4 a 150 ppp de ancho) para PNG y PDF
+  function drawReportCanvas(r, corte) {
+    const W = 1240; const M = 70; const cw = W - 2 * M;
+    const rowsTop = Math.min(r.top_products.length, 10); const rowsCash = r.by_cashier.length; const rowsRej = Math.min(r.rejected.length, 15);
+    const H = 720 + 380 + (rowsTop + rowsCash + rowsRej + 6) * 34 + 260;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const F = (sz, w) => `${w || 400} ${sz}px "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    let y = M;
+    g.fillStyle = '#2f6fec'; g.fillRect(M, y, cw, 8); y += 52;
+    g.fillStyle = '#111827'; g.font = F(40, 800); g.fillText(r.school_name || 'Cooperativa escolar', M, y); y += 46;
+    g.font = F(28, 600); g.fillStyle = '#374151'; g.fillText(`${reportTitle(r, corte)} · ${rangeText(r)}`, M, y); y += 34;
+    g.font = F(20); g.fillStyle = '#6b7280';
+    g.fillText(`Generado: ${fmtDate(r.generated_at)}${r.only_cashier ? ' · Cajero: ' + r.only_cashier : ''} · Cooperativa NFC`, M, y); y += 36;
+    const stats = [['Ventas', money(r.sales_cents)], ['Número de ventas', String(r.sales_count)], ['Ticket promedio', money(r.avg_ticket_cents)], ['Recargas', money(r.recharges_cents) + ` (${r.recharges_count})`],
+      ['Ventas rechazadas', String(r.rejected_count)], ['Monto rechazado', money(r.rejected_cents)], ['Ventas canceladas', String(r.cancelled_count)], ['Monto cancelado', money(r.cancelled_cents)]];
+    const bw = (cw - 3 * 16) / 4;
+    stats.forEach(([l, v], i) => {
+      const x = M + (i % 4) * (bw + 16); const yy = y + Math.floor(i / 4) * 118;
+      g.fillStyle = '#f5f7fb'; g.strokeStyle = '#dde3ee'; g.lineWidth = 2; g.beginPath(); if (g.roundRect) g.roundRect(x, yy, bw, 102, 12); else g.rect(x, yy, bw, 102); g.fill(); g.stroke();
+      g.fillStyle = '#6b7280'; g.font = F(19, 600); g.fillText(l, x + 18, yy + 34);
+      g.fillStyle = '#111827'; g.font = F(v.length > 14 ? 25 : 31, 800); g.fillText(v, x + 18, yy + 78);
+    });
+    y += 2 * 118 + 30;
+    // gráfica de ventas por día
+    g.fillStyle = '#111827'; g.font = F(26, 700); g.fillText('Ventas por día', M, y); y += 20;
+    const ch = 300; const pl = 90; const days = r.sales_by_day; const max = Math.max(1000, ...days.map((d) => d.total_cents));
+    g.font = F(16); g.fillStyle = '#6b7280'; g.textAlign = 'right';
+    for (let i = 0; i <= 4; i++) { const yy = y + ch - (ch * i) / 4; g.strokeStyle = '#e5e7eb'; g.lineWidth = 1; g.beginPath(); g.moveTo(M + pl, yy); g.lineTo(M + cw, yy); g.stroke(); g.fillText(money((max * i) / 4).replace('.00', ''), M + pl - 8, yy + 5); }
+    const n = Math.max(1, days.length); const bwid = (cw - pl) / n; const every = Math.ceil(n / 16);
+    g.textAlign = 'center';
+    days.forEach((d, i) => {
+      const bh = (d.total_cents / max) * ch; const x = M + pl + i * bwid;
+      g.fillStyle = '#2f6fec'; g.fillRect(x + bwid * 0.15, y + ch - bh, bwid * 0.7, bh);
+      if (i % every === 0) { g.fillStyle = '#6b7280'; g.fillText(`${d.date.slice(8, 10)}/${d.date.slice(5, 7)}`, x + bwid / 2, y + ch + 22); }
+    });
+    g.textAlign = 'left'; y += ch + 60;
+    const table = (title, heads, rows, aligns) => {
+      g.fillStyle = '#111827'; g.font = F(26, 700); g.fillText(title, M, y); y += 14;
+      const cols = heads.length; const widths = aligns.map((a, i) => (i === 0 ? cw * (cols > 3 ? 0.4 : 0.55) : cw * (cols > 3 ? 0.6 : 0.45) / (cols - 1)));
+      const row = (cells, head) => {
+        y += 34; let x = M;
+        if (head) { g.fillStyle = '#eef2f8'; g.fillRect(M, y - 24, cw, 34); }
+        g.font = F(19, head ? 700 : 400); g.fillStyle = head ? '#374151' : '#111827';
+        cells.forEach((v, i) => {
+          let s = String(v); const maxw = widths[i] - 16;
+          while (g.measureText(s).width > maxw && s.length > 3) s = s.slice(0, -2);
+          if (s !== String(v)) s = s.slice(0, -1) + '…';
+          if (aligns[i] === 'r') { g.textAlign = 'right'; g.fillText(s, x + widths[i] - 8, y); g.textAlign = 'left'; } else g.fillText(s, x + 8, y);
+          x += widths[i];
+        });
+        g.strokeStyle = '#e5e7eb'; g.beginPath(); g.moveTo(M, y + 10); g.lineTo(M + cw, y + 10); g.stroke();
+      };
+      row(heads, true);
+      if (!rows.length) { y += 34; g.fillStyle = '#6b7280'; g.font = F(19); g.fillText('Sin datos en este periodo', M + 8, y); }
+      rows.forEach((rw) => row(rw));
+      y += 50;
+    };
+    table('Productos más vendidos', ['Producto', 'Piezas', 'Total'], r.top_products.slice(0, 10).map((p) => [p.name, p.qty, money(p.total_cents)]), ['l', 'r', 'r']);
+    table('Ventas por cajero', ['Cajero', 'Ventas', 'Total'], r.by_cashier.map((p) => [p.name, p.count, money(p.total_cents)]), ['l', 'r', 'r']);
+    table('Ventas rechazadas', ['Alumno', 'Fecha', 'Motivo', 'Monto'], r.rejected.slice(0, 15).map((x) => [x.child_name || '—', fmtDate(x.created_at), x.reason || '', money(x.amount_cents)]), ['l', 'l', 'l', 'r']);
+    // recorta el alto sobrante
+    const out = document.createElement('canvas'); out.width = W; out.height = Math.min(H, y + 20);
+    out.getContext('2d').drawImage(c, 0, 0);
+    return out;
+  }
+  // PDF mínimo (sin librerías): cada página carta es una imagen JPEG del reporte
+  function canvasToPdf(canvas) {
+    const PW = 612; const PH = 792; // carta en puntos
+    const pxPerPage = Math.floor(canvas.width * (PH / PW));
+    const pages = [];
+    for (let top = 0; top < canvas.height; top += pxPerPage) {
+      const hgt = Math.min(pxPerPage, canvas.height - top);
+      const pc = document.createElement('canvas'); pc.width = canvas.width; pc.height = pxPerPage;
+      const g = pc.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, pc.width, pc.height); g.drawImage(canvas, 0, top, canvas.width, hgt, 0, 0, canvas.width, hgt);
+      const bin = atob(pc.toDataURL('image/jpeg', 0.9).split(',')[1]);
+      const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      pages.push({ bytes, w: pc.width, h: pc.height });
+    }
+    const enc = (s) => { const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i) & 255; return b; };
+    const parts = []; let len = 0; const offs = [];
+    const push = (b) => { parts.push(b); len += b.length; };
+    const obj = (id, body, stream) => { offs[id] = len; push(enc(`${id} 0 obj\n${body}\n`)); if (stream) { push(enc('stream\n')); push(stream); push(enc('\nendstream\n')); } push(enc('endobj\n')); };
+    push(enc('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'));
+    const N = pages.length; const kids = pages.map((_, i) => `${3 + i * 3} 0 R`).join(' ');
+    obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    obj(2, `<< /Type /Pages /Kids [${kids}] /Count ${N} >>`);
+    pages.forEach((p, i) => {
+      const pid = 3 + i * 3; const iid = pid + 1; const cid = pid + 2;
+      obj(pid, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im${i} ${iid} 0 R >> >> /Contents ${cid} 0 R >>`);
+      obj(iid, `<< /Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.bytes.length} >>`, p.bytes);
+      const content = enc(`q ${PW} 0 0 ${PH} 0 0 cm /Im${i} Do Q`);
+      obj(cid, `<< /Length ${content.length} >>`, content);
+    });
+    const xref = len; const total = 3 + N * 3;
+    let x = `xref\n0 ${total}\n0000000000 65535 f \n`;
+    for (let i = 1; i < total; i++) x += String(offs[i]).padStart(10, '0') + ' 00000 n \n';
+    push(enc(x + `trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`));
+    return new Blob(parts, { type: 'application/pdf' });
+  }
+  function downloadBlob(blob, name) {
+    const a = h('a', { href: URL.createObjectURL(blob), download: name }); document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 3000);
+  }
+  const reportFileName = (r, corte, ext) => `${corte ? 'corte' : 'reporte'}-${(r.school_name || 'escuela').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase()}-${r.from}${r.to !== r.from ? '_' + r.to : ''}.${ext}`;
+  function reportCsv(r) {
+    const esc = (v) => '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"';
+    const L = []; const row = (...c) => L.push(c.map(esc).join(','));
+    row(r.school_name, reportTitle(r), rangeText(r)); row();
+    row('Ventas MXN', (r.sales_cents / 100).toFixed(2)); row('Número de ventas', r.sales_count); row('Ticket promedio MXN', (r.avg_ticket_cents / 100).toFixed(2));
+    row('Recargas MXN', (r.recharges_cents / 100).toFixed(2)); row('Ventas rechazadas', r.rejected_count); row('Ventas canceladas', r.cancelled_count); row();
+    row('Fecha', 'Ventas MXN', 'Número'); r.sales_by_day.forEach((d) => row(d.date, (d.total_cents / 100).toFixed(2), d.count)); row();
+    row('Producto', 'Piezas', 'Total MXN'); r.top_products.forEach((p) => row(p.name, p.qty, (p.total_cents / 100).toFixed(2))); row();
+    row('Cajero', 'Ventas', 'Total MXN'); r.by_cashier.forEach((p) => row(p.name, p.count, (p.total_cents / 100).toFixed(2))); row();
+    row('Rechazada: fecha', 'Alumno', 'Motivo', 'Monto MXN'); r.rejected.forEach((x) => row(x.created_at, x.child_name, x.reason, (x.amount_cents / 100).toFixed(2)));
+    return new Blob(['\ufeff' + L.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  }
+  function reportBody(r, corte) {
+    const actions = h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '8px' } },
+      h('button', { class: 'btn primary', 'data-dl': 'pdf', onclick: () => { downloadBlob(canvasToPdf(drawReportCanvas(r, corte)), reportFileName(r, corte, 'pdf')); toast('PDF descargado', 'ok'); } }, '⬇ Descargar PDF'),
+      h('button', { class: 'btn', 'data-dl': 'png', onclick: () => drawReportCanvas(r, corte).toBlob((b) => { downloadBlob(b, reportFileName(r, corte, 'png')); toast('Imagen descargada', 'ok'); }, 'image/png') }, '🖼 Descargar imagen'),
+      h('button', { class: 'btn', 'data-dl': 'csv', onclick: () => downloadBlob(reportCsv(r), reportFileName(r, corte, 'csv')) }, '⬇ Excel (CSV)'));
+    const tbl = (heads, rows, empty) => (rows.length ? h('table', null, h('tr', null, heads.map(([t, right]) => h('th', { class: right ? 'right' : '' }, t))), rows.map((cells) => h('tr', null, cells.map((v, i) => h('td', { class: heads[i][1] ? 'right' : '' }, v)))))
+      : h('div', { class: 'empty' }, empty || 'Sin datos en este periodo'));
+    return h('div', { class: 'report' },
+      h('div', { class: 'card row report-head', style: { marginBottom: '16px', justifyContent: 'space-between', flexWrap: 'wrap' } },
+        h('div', null, h('h2', { style: { margin: 0 } }, r.school_name || 'Su escuela'), h('div', { class: 'muted' }, `${reportTitle(r, corte)} · ${rangeText(r)}`, r.only_cashier ? ` · ${r.only_cashier}` : '')), actions),
+      h('div', { class: 'grid g4' }, statCard('Ventas', money(r.sales_cents), `${r.sales_count} ventas`), statCard('Ticket promedio', money(r.avg_ticket_cents)),
+        statCard('Recargas', money(r.recharges_cents), `${r.recharges_count} recargas`), statCard('Ventas rechazadas', String(r.rejected_count), r.cancelled_count ? `${r.cancelled_count} canceladas (${money(r.cancelled_cents)})` : 'Por límites, saldo, prohibiciones o existencias')),
+      h('div', { class: 'card chart', style: { marginTop: '20px' } }, h('h2', null, 'Ventas por día'), barChart(r.sales_by_day)),
+      h('div', { class: 'grid g2', style: { marginTop: '20px' } },
+        h('div', { class: 'card' }, h('h2', null, 'Productos más vendidos'), tbl([['Producto'], ['Piezas', 1], ['Total', 1]], r.top_products.map((p) => [p.name, p.qty, money(p.total_cents)]))),
+        h('div', { class: 'card' }, h('h2', null, 'Ventas por cajero'), tbl([['Cajero'], ['Ventas', 1], ['Total', 1]], r.by_cashier.map((p) => [p.name, p.count, money(p.total_cents)])))),
+      h('div', { class: 'card', style: { marginTop: '20px' } }, h('h2', null, 'Ventas rechazadas'),
+        tbl([['Fecha'], ['Alumno'], ['Motivo'], ['Monto', 1]], r.rejected.map((x) => [fmtDate(x.created_at), x.child_name || '—', x.reason || '', money(x.amount_cents)]), 'No hubo ventas rechazadas')));
+  }
+  VIEWS.reportes = async (main, params) => {
+    const preset = params.p || 'hoy';
+    const rg = preset === 'personalizado' ? { from: params.from || presetRange('mes').from, to: params.to || ymdLocal(new Date()) } : presetRange(preset);
+    const from = h('input', { type: 'date', value: rg.from }); const to = h('input', { type: 'date', value: rg.to });
+    const corte = preset === 'hoy' && params.corte;
+    const tabs = h('div', { class: 'tabs' }, [['hoy', 'Hoy'], ['semana', 'Esta semana'], ['mes', 'Este mes'], ['personalizado', 'Personalizado']]
+      .map(([k, l]) => h('button', { class: 'btn' + (k === preset ? ' active' : ''), onclick: () => go('reportes', { p: k }) }, l)),
+    h('button', { class: 'btn ok', style: { marginLeft: 'auto' }, onclick: () => go('reportes', { p: 'hoy', corte: 1 }) }, '🧮 Corte del día'));
+    const custom = preset === 'personalizado' ? h('div', { class: 'card filters' }, field('Desde', from), field('Hasta', to), h('button', { class: 'btn primary', onclick: () => go('reportes', { p: 'personalizado', from: from.value, to: to.value }) }, 'Ver reporte')) : null;
+    put(main, pageHead(corte ? 'Corte del día' : 'Reportes', 'Ventas, recargas y rechazos del periodo. Descárguelo en PDF o como imagen para imprimir o enviar.'), tabs, custom);
+    const r = await call('report', rg);
+    main.appendChild(reportBody(r, corte));
+  };
+  VIEWS.corte = async (main) => {
+    const r = await call('report', {});
+    put(main, pageHead('Corte del día', state.user.role === 'cajero' ? 'Sus ventas de hoy. Descárguelo para entregarlo al cerrar la caja.' : 'Ventas de hoy.'), reportBody(r, true));
+  };
+
+  // ----- Tutor: notificaciones push en este teléfono -----
+  const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const IS_STANDALONE = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  function b64ToBytes(s) { const p = '='.repeat((4 - (s.length % 4)) % 4); const b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, (ch) => ch.charCodeAt(0)); }
+  async function currentPushSub() { if (!pushSupported()) return null; const reg = await navigator.serviceWorker.getRegistration(); return reg ? reg.pushManager.getSubscription() : null; }
+  async function enablePush() {
+    if (!pushSupported()) throw new Error(IS_IOS ? 'En iPhone/iPad primero agregue la app a la pantalla de inicio y ábrala desde el ícono.' : 'Este navegador no permite notificaciones.');
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') throw new Error('No se dio permiso para notificaciones. Actívelo en los ajustes del navegador para este sitio.');
+    const k = await window.coop.push.key();
+    if (!k.ok || !k.data.publicKey) throw new Error('El servidor no tiene notificaciones configuradas.');
+    const reg = await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      // si la llave del servidor cambió, se vuelve a suscribir
+      const cur = sub.options && sub.options.applicationServerKey ? btoa(String.fromCharCode(...new Uint8Array(sub.options.applicationServerKey))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : k.data.publicKey;
+      if (cur !== k.data.publicKey) { await sub.unsubscribe(); sub = null; }
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(k.data.publicKey) });
+    await call('pushSubscribe', { subscription: sub.toJSON(), user_agent: navigator.userAgent.slice(0, 300) });
+    window.coop.push.test().catch(() => {});
+  }
+  async function pushCard() {
+    const prefs = await call('getPushPrefs');
+    const sub = await currentPushSub().catch(() => null);
+    const on = !!sub && Notification.permission === 'granted';
+    const box = h('div', { class: 'card push-card', 'data-push': on ? 'on' : 'off', style: { marginBottom: '16px' } });
+    const chk = (k, label) => { const i = h('input', { type: 'checkbox', checked: prefs[k], 'data-pref': k }); return { i, el: h('label', { class: 'check' }, i, label) }; };
+    const c1 = chk('purchases', 'Cada compra (productos, monto y saldo restante)'); const c2 = chk('rejected', 'Compras rechazadas'); const c3 = chk('low_balance', 'Saldo bajo');
+    const th = h('input', { value: centsToInput(prefs.low_balance_cents), inputmode: 'decimal', style: { width: '110px' }, 'data-pref': 'threshold' });
+    const save = async () => {
+      const r = await safe(async () => call('setPushPrefs', { purchases: c1.i.checked, rejected: c2.i.checked, low_balance: c3.i.checked, low_balance_cents: parseMoney(th.value) }));
+      if (r) toast('Preferencias guardadas', 'ok');
+    };
+    let hint = null;
+    if (IS_IOS && !IS_STANDALONE()) hint = banner('info', '📱', h('b', null, 'En iPhone o iPad: '), 'las notificaciones solo funcionan con la app instalada. Toque ', h('b', null, 'Compartir ⬆'), ' → ', h('b', null, 'Agregar a inicio'), ', abra la Cooperativa desde el ícono y toque aquí "Activar notificaciones" (requiere iOS 16.4 o más reciente).');
+    else if (!pushSupported()) hint = banner('warn', '⚠️', 'Este navegador no permite notificaciones. Use Chrome, Edge, Firefox o Safari actualizados.');
+    else if (Notification.permission === 'denied') hint = banner('warn', '🔕', 'Las notificaciones están bloqueadas para este sitio. Permítalas en los ajustes del navegador y vuelva a intentarlo.');
+    put(box, h('div', { class: 'row', style: { justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' } },
+      h('div', null, h('h2', { style: { margin: 0 } }, '🔔 Notificaciones'), h('div', { class: 'small muted' }, on ? 'Activadas en este teléfono. Le avisaremos al momento.' : 'Reciba un aviso en este teléfono cuando su hijo(a) compre en la cooperativa.')),
+      on ? h('div', { class: 'row', style: { gap: '8px' } }, badge('activadas', 'ok'), h('button', { class: 'btn sm', onclick: async () => { await safe(async () => { const s2 = await currentPushSub(); if (s2) { await call('pushUnsubscribe', { endpoint: s2.endpoint }); await s2.unsubscribe(); } toast('Notificaciones desactivadas en este teléfono', 'ok'); render(); }); } }, 'Desactivar'))
+        : h('button', { class: 'btn primary', 'data-push-enable': '1', disabled: IS_IOS && !IS_STANDALONE() ? true : undefined, onclick: async () => { const ok = await safe(async () => { await enablePush(); return true; }); if (ok) { toast('Notificaciones activadas', 'ok'); render(); } } }, 'Activar notificaciones')),
+    hint ? h('div', { style: { marginTop: '12px' } }, hint) : null,
+    h('div', { class: 'push-prefs', style: { marginTop: '14px', display: 'grid', gap: '8px' } }, h('div', { class: 'small muted' }, 'Avisarme de:'), c1.el, c2.el,
+      h('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap' } }, c3.el, h('span', { class: 'small' }, 'cuando quede menos de $'), th, h('span', { class: 'small muted' }, '(un aviso cada vez que baje de esa cantidad)')),
+      h('div', null, h('button', { class: 'btn sm', onclick: save }, 'Guardar preferencias'))));
+    return box;
   }
 
   // ----- Tutor: mis hijos -----
@@ -769,6 +1034,7 @@
         modal('Vincular otro hijo', h('div', { class: 'form' }, h('p', { class: 'small muted' }, 'Escriba el código de invitación que le dio la cooperativa.'), field('Código', code)),
           [{ label: 'Cancelar' }, { label: 'Vincular', class: 'primary', onClick: async () => { const r = await window.coop.auth.redeem(code.value); if (!r.ok) { toast(r.error, 'err'); return false; } toast(`${r.data.child.full_name} vinculado`, 'ok'); render(); } }]);
       } }, '+ Agregar hijo con código') : null));
+    if (WEB && state.user.role === 'tutor' && window.coop.push) { try { main.appendChild(await pushCard()); } catch (e) { console.warn('[push]', e.message); } }
     if (!kids.length) { main.appendChild(h('div', { class: 'card empty' }, 'Aún no hay alumnos registrados a su nombre. Acuda a la cooperativa para registrar la tarjeta.')); return; }
     const sums = await Promise.all(kids.map((k) => call('childSummary', { child_id: k.id })));
     main.appendChild(h('div', { class: 'grid g2' }, sums.map((s) => {
@@ -949,7 +1215,9 @@
   VIEWS.notificaciones = async (main, params) => {
     const filter = params.f || 'pendiente';
     const rows = await call('listChangeRequests', filter === 'todas' ? {} : { status: filter });
+    const notices = await call('listSchoolNotices').catch(() => []);
     await call('markChangeRequestsRead').catch(() => {});
+    await call('markNoticesRead').catch(() => {});
     state.notifCount = 0; setNavCount('notificaciones', 0);
     const resolve = async (r, decision) => {
       if (decision === 'aprobar') {
@@ -978,7 +1246,11 @@
         h('td', null, crBadge(r.status), r.resolved_at ? h('div', { class: 'small muted' }, fmtDate(r.resolved_at), r.resolved_by_name ? ' · ' + r.resolved_by_name : '') : null),
         h('td', { style: { whiteSpace: 'nowrap' } }, r.status === 'pendiente' ? [h('button', { class: 'btn sm ok', onclick: () => resolve(r, 'aprobar') }, '✔ Aprobar'), ' ', h('button', { class: 'btn sm danger', onclick: () => resolve(r, 'rechazar') }, '✖ Rechazar')] : null))))))
       : h('div', { class: 'card empty' }, filter === 'pendiente' ? 'No hay solicitudes pendientes.' : 'No hay solicitudes.');
-    put(main, pageHead('Notificaciones', 'Solicitudes de los padres para corregir datos de sus hijos. Al aprobar un cambio de nombre o de grado y grupo, se aplica automáticamente.'), tabs, table);
+    const recent = notices.slice(0, 20);
+    const noticeBox = recent.length ? h('div', { class: 'card', style: { marginBottom: '16px' }, 'data-notices': '1' }, h('div', { class: 'row', style: { justifyContent: 'space-between' } }, h('h2', { style: { margin: 0 } }, '📦 Avisos de inventario'),
+      h('button', { class: 'btn sm', onclick: () => go('productos', { f: 'agotarse' }) }, 'Ver productos por agotarse')),
+    h('div', { class: 'notice-list' }, recent.map((n) => h('div', { class: 'notice' + (n.unread ? ' unread' : ''), 'data-notice': n.id }, h('span', null, n.unread ? badge('nueva', 'info') : null, ' ', n.message), h('span', { class: 'small muted' }, fmtDate(n.created_at)))))) : null;
+    put(main, pageHead('Notificaciones', 'Avisos de inventario y solicitudes de los padres para corregir datos de sus hijos. Al aprobar un cambio de nombre o de grado y grupo, se aplica automáticamente.'), noticeBox, h('h2', { class: 'section-title' }, 'Solicitudes de los padres'), tabs, table);
   };
 
   // ======================================================================
