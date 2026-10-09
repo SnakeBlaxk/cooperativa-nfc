@@ -119,7 +119,17 @@ tr:hover td { background: #fafbfd; } td .btn + .btn { margin-left: 6px; }
 .syncind:hover { background: rgba(255,255,255,.12); }
 .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; }
 /* superadmin */
-.badge.prueba { background: var(--primary-bg); color: var(--primary); } .badge.suspendida { background: var(--err-bg); color: var(--err); }
+.badge.prueba { background: var(--primary-bg); color: var(--primary); } .badge.suspendida, .badge.pausada { background: var(--err-bg); color: var(--err); }
+/* mensualidad */
+.billtxt { font-weight: 700; } .billtxt.ok { color: var(--ok); } .billtxt.warn { color: var(--warn); } .billtxt.err { color: var(--err); }
+tr.row-warn td { background: #fffaf0; } tr.row-err td { background: #fff4f3; }
+tr.row-warn td:first-child { box-shadow: inset 5px 0 0 #f0b429; } tr.row-err td:first-child { box-shadow: inset 5px 0 0 var(--err); }
+.billing-card { border-left: 6px solid var(--ok); } .billing-card.warn { border-left-color: #f0b429; } .billing-card.err { border-left-color: var(--err); }
+.billing-kv { margin-top: 14px; gap: 14px; } .billing-kv .l { color: var(--muted); font-size: .9rem; font-weight: 600; } .billing-kv .v { font-size: 1.15rem; font-weight: 700; margin-top: 4px; }
+.banner.billing b { font-size: 1.12rem; }
+.banner ul.attn { margin: 6px 0 0; padding-left: 20px; font-weight: 500; }
+.paused-box { background: var(--err-bg); border: 2px solid #f2b8b5; color: #8f1d1d; border-radius: 16px; padding: 18px 20px; text-align: center; display: grid; gap: 6px; }
+.paused-box .ico { font-size: 2.2rem; } .paused-box b { font-size: 1.2rem; }
 .stats .stat .v { font-size: 1.5rem; word-break: break-word; }
 .bigcode { font-size: 1.8rem; font-weight: 800; text-align: center; letter-spacing: .08em; font-family: Consolas, "Courier New", monospace; background: #f3f6fb; border: 2px dashed #b9c6dc; border-radius: 14px; padding: 16px; user-select: all; }
 .modal.wide { width: 920px; }

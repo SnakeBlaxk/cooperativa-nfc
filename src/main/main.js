@@ -72,7 +72,12 @@ async function init() {
     if (method === 'login' && cfg.serverUrl && args && args.username) {
       const linkedSchool = (db.get("SELECT value FROM meta WHERE key = 'linked_school_uuid'") || {}).value || null;
       const r = await remoteLogin({ serverUrl: cfg.serverUrl, username: String(args.username), password: String(args.password || ''), db, schoolUuid: cfg.deviceToken ? linkedSchool : null, localSchoolId: schoolId });
-      if (r.status === 'rejected') return { ok: false, error: r.error, code: 'NO_AUTENTICADO' };
+      if (r.status === 'rejected') {
+        // Escuela pausada (mensualidad): se recuerda para bloquear la caja aunque luego se entre sin conexión
+        if (r.code === 'ESCUELA_PAUSADA' && cfg.deviceToken) db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('server_paused', '1')");
+        return { ok: false, error: r.error, code: r.code === 'ESCUELA_PAUSADA' ? 'ESCUELA_PAUSADA' : 'NO_AUTENTICADO' };
+      }
+      if (r.status === 'ok' && cfg.deviceToken) db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('server_paused', '0')"); // el servidor aceptó: no está pausada
       const local = api.handle(session, 'login', args);
       if (local.ok && r.status === 'ok') session.remote = r.tokens; // reservado para la futura sincronización
       if (local.ok && r.status === 'offline') local.data = { ...local.data, offline: true };
@@ -80,7 +85,10 @@ async function init() {
     }
     // Banderas de seguridad recibidas del servidor (congelar recargas/ventas, solo lectura, ALERTA ROJA)
     const flags = cfg.deviceToken ? readSecurityFlags() : null;
-    if (method === 'securityStatus') return { ok: true, data: flags || {} };
+    // Mensualidad: aviso de vencimiento/tolerancia y escuela pausada (según la última sincronización)
+    const paused = !!cfg.deviceToken && syncClient.isPaused();
+    if (method === 'securityStatus') return { ok: true, data: { ...(flags || {}), paused, billing: cfg.deviceToken ? syncClient.billingNotice() : null } };
+    if (paused && session.user && !READ_ONLY.test(String(method))) return { ok: false, error: 'Servicio pausado. Contacte a la administración. Las ventas y recargas están detenidas hasta que se reactive el servicio.', code: 'ESCUELA_PAUSADA' };
     if (flags && session.user && !READ_ONLY.test(String(method))) {
       const today = new Date(); const d0 = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')} 00:00:00`;
       const todayRechargesCents = method === 'recharge' ? db.get("SELECT COALESCE(SUM(amount_cents),0) AS s FROM transactions WHERE type = 'recarga' AND status = 'aprobado' AND created_at >= ?", [d0]).s : 0;
@@ -105,7 +113,7 @@ async function init() {
   ipcMain.handle('sync:unlink', (event) => {
     if (!isAdmin(event)) return { ok: false, error: 'Solo el administrador' };
     const c = readConfig(); delete c.deviceToken; writeConfig(c);
-    db.run("DELETE FROM meta WHERE key = 'server_security'");
+    db.run("DELETE FROM meta WHERE key IN ('server_security', 'server_paused', 'server_billing')");
     return { ok: true, data: syncClient.getStatus() };
   });
   ipcMain.handle('sync:makePrimary', async (event, a) => {

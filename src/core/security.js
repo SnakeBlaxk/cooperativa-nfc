@@ -84,6 +84,7 @@ function createSecurity(db, opts = {}) {
     contrasenas: ['contrasena_asignada', 'contrasena_propia', 'superadmin_recuperado'],
     roles: ['rol_cambiado', 'cuenta_activada', 'cuenta_desactivada', 'usuario_creado', 'usuario_editado', 'cuenta_desbloqueada'],
     accesos: ['login', 'login_fallido', 'cuenta_bloqueada_intentos', 'login_rechazado_bloqueo'],
+    mensualidad: ['mensualidad_pago', 'mensualidad_periodo', 'mensualidad_por_vencer', 'mensualidad_tolerancia', 'escuela_pausada', 'escuela_pausada_auto', 'escuela_reactivada', 'login_rechazado_pausa'],
     emergencia: ['alerta_roja', 'alerta_roja_fin', 'congelar_recargas', 'congelar_ventas', 'solo_lectura', 'cerrar_sesiones', 'bloquear_admin', 'limites_escuela', 'respaldo_descargado'],
   };
 
@@ -369,6 +370,7 @@ function createSecurity(db, opts = {}) {
     if (f.q) { w.push('(u.username LIKE ? OR u.full_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)'); const q = '%' + String(f.q).slice(0, 60) + '%'; p.push(q, q, q, q); }
     const ORDER = "CASE u.role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 WHEN 'cajero' THEN 2 ELSE 3 END";
     return db.all(`SELECT u.id, u.username, u.role, u.full_name, u.email, u.phone, u.active, u.school_id, u.created_at, u.last_login_at, u.last_login_ip, u.locked_until, u.failed_logins, u.password_set_at, u.password_set_by,
+        s.status AS school_status,
         CASE WHEN u.role = 'tutor' THEN COALESCE((SELECT group_concat(DISTINCT s2.name) FROM children c JOIN schools s2 ON s2.id = c.school_id WHERE c.tutor_id = u.id), s.name) ELSE s.name END AS school_name
       FROM users u LEFT JOIN schools s ON s.id = u.school_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY ${ORDER}, school_name, u.full_name LIMIT 2000`, p)
       .map((u) => ({ ...u, active: !!u.active, locked: !!(u.locked_until && u.locked_until > Date.now()) }));

@@ -162,13 +162,14 @@ test('superadmin: ve todas las escuelas y totales; solo él entra al panel', asy
   assert.equal((await sup('updateSchool', { id: c.data.school.id, status: 'otra' }, ZUKI)).status, 400);
 });
 
-test('escuela suspendida: su personal no entra y su caja no sincroniza; los padres sí consultan', async () => {
+test('escuela pausada: su personal no entra y su caja no sincroniza; el padre con hijos en otra escuela activa sí consulta', async () => {
   const sid = idOf('schools', 'name', 'Instituto Valladolid (demo)');
   const B2 = await tok('cajero2', 'cajero123');
-  assert.ok((await sup('updateSchool', { id: sid, status: 'suspendida' }, ZUKI)).ok);
-  assert.equal((await rpc('listChildren', {}, B2)).status, 401); // sesiones cerradas
+  assert.ok((await sup('updateSchool', { id: sid, status: 'suspendida' }, ZUKI)).ok); // nombre anterior = pausada
+  const closed = await rpc('listChildren', {}, B2);
+  assert.equal(closed.status, 403); assert.equal(closed.code, 'ESCUELA_PAUSADA'); // sesión cerrada con mensaje claro
   const l = await api('/api/auth/login', { body: { identifier: 'admin2', password: 'admin123' } });
-  assert.equal(l.status, 403); assert.equal(l.code, 'ESCUELA_SUSPENDIDA');
+  assert.equal(l.status, 403); assert.equal(l.code, 'ESCUELA_PAUSADA'); assert.equal(l.error, 'Servicio pausado. Contacte a la administración.');
   // el padre sigue viendo a su hija
   assert.ok((await rpc('listChildren', {}, MARIA)).data.some((k) => k.full_name === 'Lucía Hernández'));
   // la escuela A no se ve afectada
@@ -243,7 +244,7 @@ test('sincronización por escuela: cada caja solo envía/recibe su escuela y los
   // equipo de una escuela suspendida no sincroniza
   await sup('updateSchool', { id: B_ID, status: 'suspendida' }, Z);
   const susp = await cB.syncNow();
-  assert.equal(susp.state, 'error'); assert.match(susp.last_error, /suspendido/);
+  assert.equal(susp.state, 'pausado'); assert.match(susp.last_error, /Servicio pausado/);
 });
 
 test('migración: una base de una sola escuela (versión anterior) queda en una escuela por defecto', async () => {

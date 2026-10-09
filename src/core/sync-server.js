@@ -17,7 +17,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex'
 const isUuid = (u) => typeof u === 'string' && /^[0-9a-f]{32}$/.test(u);
 
 function createSyncServer(db, opts = {}) {
-  const hooks = { onRecharge: opts.onRecharge || null };
+  const hooks = { onRecharge: opts.onRecharge || null, checkSchool: opts.checkSchool || null };
   const ts = () => fmtLocal(new Date());
   const primaryOf = (sid) => { const r = db.get('SELECT primary_device_id AS p FROM schools WHERE id = ?', [sid]); return r ? r.p : null; };
   const setPrimaryOf = (sid, dev) => db.run('UPDATE schools SET primary_device_id = ? WHERE id = ?', [dev, sid]);
@@ -59,7 +59,10 @@ function createSyncServer(db, opts = {}) {
     const d = db.get(`SELECT d.*, s.status AS school_status, s.name AS school_name, s.uuid AS school_uuid FROM devices d JOIN schools s ON s.id = d.school_id
       WHERE d.token_hash = ? AND d.revoked = 0`, [sha256(token || '')]);
     if (!d) throw new AppError('Equipo no autorizado o revocado', 'NO_AUTENTICADO');
-    if (d.school_status === 'suspendida') throw new AppError('El servicio de esta escuela está suspendido. Comunícate con Zuki Company.', 'ESCUELA_SUSPENDIDA');
+    // Mensualidad: revisa vencimientos antes de aceptar al equipo (puede pausar la escuela en este momento)
+    let st = d.school_status;
+    if (hooks.checkSchool) { try { const i = hooks.checkSchool(d.school_id); if (i) st = i.status; } catch (e) { console.error('[sync] mensualidad:', e.message); } }
+    if (st === 'pausada' || st === 'suspendida') throw new AppError('Servicio pausado. Contacte a la administración.', 'ESCUELA_PAUSADA');
     db.run('UPDATE devices SET last_seen_at = ? WHERE id = ?', [ts(), d.id]);
     return d;
   }

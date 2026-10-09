@@ -129,11 +129,20 @@ function createService(db, opts = {}) {
     assertSchoolActive(u);
     return publicUser(u);
   }
-  // El personal de una escuela suspendida no puede entrar (los tutores sí, para consultar)
+  // Escuela PAUSADA (mensualidad): nadie de esa escuela entra (administrador, cajero ni tutores).
+  // Un tutor con hijos en varias escuelas sigue entrando mientras alguna de ellas esté activa.
+  const PAUSED = (st) => st === 'pausada' || st === 'suspendida';
   function assertSchoolActive(u) {
-    if (!u || !['admin', 'cajero'].includes(u.role) || !u.school_id) return;
-    const s = db.get('SELECT status FROM schools WHERE id = ?', [u.school_id]);
-    if (s && s.status === 'suspendida') throw new AppError('El servicio de esta escuela está suspendido. Comunícate con Zuki Company.', 'ESCUELA_SUSPENDIDA');
+    if (!u || u.role === 'superadmin') return;
+    let blocked = false;
+    if (u.role === 'tutor') {
+      const rows = db.all('SELECT status FROM schools WHERE id IN (SELECT school_id FROM children WHERE tutor_id = ?) OR id = ?', [u.id, u.school_id || -1]);
+      blocked = rows.length > 0 && rows.every((r) => PAUSED(r.status));
+    } else if (u.school_id) {
+      const s = db.get('SELECT status FROM schools WHERE id = ?', [u.school_id]);
+      blocked = !!(s && PAUSED(s.status));
+    }
+    if (blocked) throw new AppError('Servicio pausado. Contacte a la administración.', 'ESCUELA_PAUSADA');
   }
   // Política: solo el superadministrador cambia contraseñas (la suya y, desde su panel, las de los demás).
   function changePassword(actor, current, next) {

@@ -78,6 +78,7 @@ function createAuth(db, svc, opts = {}) {
   }
 
   const security = opts.security || null;
+  const billing = opts.billing || null;
   const lockedOut = () => new AppError('El sistema está en ALERTA ROJA: el acceso está bloqueado temporalmente. Comuníquese con el administrador de la plataforma.', 'SISTEMA_BLOQUEADO');
   // Bloqueo persistente tras varios intentos fallidos (más estricto para el superadministrador)
   const MAX_FAILS = { superadmin: opts.maxSuperadminFails || 5, other: opts.maxAccountFails || 10 };
@@ -91,8 +92,13 @@ function createAuth(db, svc, opts = {}) {
       if (security) security.audit({ id: target.id, full_name: target.full_name, role: target.role, school_id: target.school_id }, 'login_rechazado_bloqueo', { ip, severity: 'aviso' });
       throw new AppError(`Cuenta bloqueada por intentos fallidos. Intenta de nuevo en ${Math.ceil((target.locked_until - nowMs()) / 60000)} min.`, 'LIMITE_INTENTOS');
     }
+    if (billing && target) billing.evaluateForUser(target); // mensualidad: puede pausar la escuela si ya venció
     let user;
     try { user = svc.login(identifier, password); } catch (e) {
+      if (e.code === 'ESCUELA_PAUSADA') { // contraseña correcta pero la escuela está pausada: no cuenta como intento fallido
+        if (security) security.audit({ id: target.id, full_name: target.full_name, role: target.role, school_id: target.school_id }, 'login_rechazado_pausa', { ip, severity: 'info' });
+        throw e;
+      }
       loginLimiter.hit(idKey); ipLimiter.hit('ip:' + ip);
       if (target && e.code === 'NO_AUTENTICADO') {
         const fails = (target.failed_logins || 0) + 1;
@@ -120,10 +126,13 @@ function createAuth(db, svc, opts = {}) {
     try { p = jwt.verify(String(token || ''), secret, { algorithms: ['HS256'], issuer: 'cooperativa-nfc', clockTimestamp: Math.floor(nowMs() / 1000) }); } catch (e) {
       throw new AppError(e.name === 'TokenExpiredError' ? 'La sesión expiró' : 'Sesión inválida', 'NO_AUTENTICADO');
     }
-    const u = getUser(p.sub);
-    if (!u || !u.active || u.token_version !== p.tv) throw new AppError('Sesión inválida o cerrada', 'NO_AUTENTICADO');
-    if (security && u.role !== 'superadmin' && security.isLockdown()) throw new AppError('Sesión cerrada: el sistema está en ALERTA ROJA', 'NO_AUTENTICADO');
+    let u = getUser(p.sub);
+    if (!u || !u.active) throw new AppError('Sesión inválida o cerrada', 'NO_AUTENTICADO');
+    // Escuela pausada (mensualidad): se informa antes que "sesión cerrada" para mostrar el mensaje correcto
+    if (billing && u.role !== 'superadmin') { billing.evaluateForUser(u); u = getUser(u.id); }
     svc.assertSchoolActive(u);
+    if (u.token_version !== p.tv) throw new AppError('Sesión inválida o cerrada', 'NO_AUTENTICADO');
+    if (security && u.role !== 'superadmin' && security.isLockdown()) throw new AppError('Sesión cerrada: el sistema está en ALERTA ROJA', 'NO_AUTENTICADO');
     return svc.publicUser(u);
   }
 
@@ -132,6 +141,11 @@ function createAuth(db, svc, opts = {}) {
   function refresh(refreshToken, { userAgent } = {}) {
     const row = db.get('SELECT * FROM refresh_tokens WHERE token_hash = ?', [sha256(refreshToken || '')]);
     if (!row) throw new AppError('Sesión inválida', 'NO_AUTENTICADO');
+    const owner = getUser(row.user_id);
+    if (owner && owner.active && owner.role !== 'superadmin' && row.expires_at >= nowMs()) {
+      if (billing) billing.evaluateForUser(owner);
+      svc.assertSchoolActive(getUser(owner.id)); // escuela pausada: mensaje claro (sin revocar la familia de tokens)
+    }
     if (row.revoked) {
       db.run('UPDATE refresh_tokens SET revoked = 1 WHERE family = ?', [row.family]);
       throw new AppError('Sesión revocada. Inicia sesión de nuevo.', 'NO_AUTENTICADO');

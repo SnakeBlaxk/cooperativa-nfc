@@ -17,7 +17,7 @@ async function remoteLogin({ serverUrl, username, password, db, fetchImpl = glob
     return { status: 'offline', error: e.name === 'AbortError' ? 'Tiempo de espera agotado' : e.message };
   } finally { clearTimeout(timer); }
   if (res.status >= 500) return { status: 'offline', error: 'Error del servidor' };
-  if (!body || !body.ok) return { status: 'rejected', error: (body && body.error) || 'Credenciales rechazadas por el servidor' };
+  if (!body || !body.ok) return { status: 'rejected', error: (body && body.error) || 'Credenciales rechazadas por el servidor', code: body && body.code };
   const ru = body.data.user;
   if (ru.role === 'superadmin') return { status: 'rejected', error: 'La cuenta de superadministrador se usa en el panel web, no en la caja' };
   if (!['admin', 'cajero'].includes(ru.role)) return { status: 'local-only', error: 'Las cuentas de tutor se usan en la app web' };

@@ -18,19 +18,24 @@
   function store(t) { access = t.access_token; localStorage.setItem(RT_KEY, t.refresh_token); }
   function clear() { access = null; localStorage.removeItem(RT_KEY); }
   let refreshing = null;
+  let pausedErr = null; // escuela pausada (mensualidad): el servidor lo indica al renovar la sesión
   async function refresh() {
     const rt = localStorage.getItem(RT_KEY);
     if (!rt) return false;
     if (!refreshing) {
-      refreshing = req('/api/auth/refresh', { refresh_token: rt }).then((r) => { refreshing = null; if (r.ok) { store(r.data); return true; } if (r.code !== 'SIN_CONEXION') clear(); return false; });
+      refreshing = req('/api/auth/refresh', { refresh_token: rt }).then((r) => {
+        refreshing = null; pausedErr = !r.ok && r.code === 'ESCUELA_PAUSADA' ? r : null;
+        if (r.ok) { store(r.data); return true; } if (r.code !== 'SIN_CONEXION') clear(); return false;
+      });
     }
     return refreshing;
   }
   // Llamada autenticada con reintento tras renovar el token de acceso
   async function authed(path, body, method) {
-    if (!access) await refresh();
+    if (!access && !(await refresh()) && pausedErr) return pausedErr;
     let r = await req(path, body, { auth: true, method });
-    if (!r.ok && r.code === 'NO_AUTENTICADO' && await refresh()) r = await req(path, body, { auth: true, method });
+    if (!r.ok && r.code === 'NO_AUTENTICADO') { if (await refresh()) r = await req(path, body, { auth: true, method }); else if (pausedErr) r = pausedErr; }
+    if (!r.ok && r.code === 'ESCUELA_PAUSADA') clear();
     return r;
   }
 
@@ -43,9 +48,9 @@
       }
       case 'logout': { const rt = localStorage.getItem(RT_KEY); clear(); if (rt) await req('/api/auth/logout', { refresh_token: rt }); return { ok: true, data: null }; }
       case 'me': {
-        if (!access && !(await refresh())) return { ok: true, data: null };
+        if (!access && !(await refresh())) return pausedErr || { ok: true, data: null };
         const r = await authed('/api/auth/me', null, 'GET');
-        return r.ok ? r : { ok: true, data: null };
+        return r.ok || r.code === 'ESCUELA_PAUSADA' ? r : { ok: true, data: null };
       }
       case 'changePassword': {
         const r = await authed('/api/auth/change-password', { current: args.current, next: args.next });

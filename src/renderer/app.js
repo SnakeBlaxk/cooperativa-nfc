@@ -44,7 +44,9 @@
     const r = await window.coop.call(method, args);
     if (!r.ok) {
       if (r.code === 'NO_AUTENTICADO' && method !== 'login') { state.user = null; render(); }
-      throw new Error(r.error);
+      // Escuela pausada (mensualidad) en la app web: se cierra la sesión y se muestra el aviso en la entrada
+      if (r.code === 'ESCUELA_PAUSADA' && method !== 'login' && WEB) { state.user = null; state.pausedMsg = r.error; render(); }
+      throw Object.assign(new Error(r.error), { code: r.code });
     }
     return r.data;
   }
@@ -176,6 +178,8 @@
         if (f.freeze_recharges) msgs.push('Las RECARGAS están congeladas por seguridad.');
         if (f.freeze_sales) msgs.push('Las VENTAS están congeladas por seguridad.');
         if (msgs.length) main.prepend(banner('err', '⛔', h('b', null, msgs.join(' ')), h('div', { class: 'small' }, 'Si cree que es un error, comuníquese con el administrador de la plataforma.')));
+        const bb = billingBanner(f.billing, f.paused);
+        if (bb) main.prepend(bb);
       }).catch(() => {});
     }
     if (state.user.role === 'superadmin') refreshAlertCount();
@@ -197,16 +201,46 @@
   function teardown() { cleanups.forEach((f) => { try { f(); } catch (_) { /* */ } }); cleanups = []; }
   async function logout() { await window.coop.call('logout'); state.user = null; state.view = null; render(); }
 
+  // ---------- mensualidad: avisos para administrador y cajero (los padres no los ven) ----------
+  const ddmmyyyy = (s) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : '');
+  const diasTxt = (n) => (n === 1 ? '1 día' : `${n} días`);
+  function billingBanner(b, paused) {
+    if (paused || (b && b.stage === 'pausada')) {
+      return h('div', { class: 'banner err billing', 'data-billing': 'pausada' }, h('span', { class: 'ico' }, '⏸️'),
+        h('div', null, h('b', null, 'Servicio pausado. Contacte a la administración.'), h('div', { class: 'small' }, 'Las ventas y recargas están detenidas hasta que se reactive el servicio. Sus datos se conservan.')));
+    }
+    if (!b) return null;
+    if (b.stage === 'aviso') {
+      return h('div', { class: 'banner warn billing', 'data-billing': 'aviso' }, h('span', { class: 'ico' }, '📅'),
+        h('div', null, h('b', null, b.days_left === 0 ? 'Tu mensualidad vence hoy' : `Tu mensualidad vence en ${diasTxt(b.days_left)}`),
+          h('div', { class: 'small' }, `Fecha de vencimiento: ${ddmmyyyy(b.period_end)}. Para no interrumpir el servicio, realice su pago con la administración.`)));
+    }
+    if (b.stage === 'tolerancia') {
+      return h('div', { class: 'banner err billing', 'data-billing': 'tolerancia' }, h('span', { class: 'ico' }, '⚠️'),
+        h('div', null, h('b', null, `Periodo de tolerancia: ${b.grace_days_left === 1 ? 'queda 1 día' : `quedan ${b.grace_days_left} días`} para realizar el pago`),
+          h('div', { class: 'small' }, `Su mensualidad venció el ${ddmmyyyy(b.period_end)}. Si no se registra el pago, el servicio se pausará automáticamente el ${ddmmyyyy(b.pause_on)}.`)));
+    }
+    return null;
+  }
+  const pausedBox = (msg) => h('div', { class: 'paused-box', role: 'alert' }, h('div', { class: 'ico' }, '⏸️'),
+    h('b', null, msg || 'Servicio pausado. Contacte a la administración.'),
+    h('div', { class: 'small' }, 'Su información está guardada y segura. El acceso volverá en cuanto se reactive el servicio.'));
+
   function renderLogin() {
     const u = h('input', { placeholder: 'Usuario, correo o teléfono', autofocus: true, autocomplete: 'username' });
     const p = h('input', { placeholder: 'Contraseña', type: 'password', autocomplete: 'current-password' });
     const err = h('div', { class: 'small', role: 'alert', style: { color: 'var(--err)', minHeight: '20px', fontWeight: 600 } });
+    const paused = h('div');
+    if (state.pausedMsg) { paused.appendChild(pausedBox(state.pausedMsg)); state.pausedMsg = null; }
     const submit = async (e) => {
-      e.preventDefault(); err.textContent = '';
-      try { state.user = await call('login', { username: u.value, password: p.value }); state.view = null; render(); if (state.user && state.user.offline) toast('Servidor no disponible: sesión iniciada en modo sin conexión'); } catch (ex) { err.textContent = ex.message; p.select(); }
+      e.preventDefault(); err.textContent = ''; paused.innerHTML = '';
+      try { state.user = await call('login', { username: u.value, password: p.value }); state.view = null; render(); if (state.user && state.user.offline) toast('Servidor no disponible: sesión iniciada en modo sin conexión'); } catch (ex) {
+        if (ex.code === 'ESCUELA_PAUSADA') paused.appendChild(pausedBox()); else err.textContent = ex.message;
+        p.select();
+      }
     };
     $app.appendChild(h('div', { class: 'login-wrap' }, h('form', { class: 'card login form', onsubmit: submit },
-      h('div', { class: 'logo' }, '🪪'), h('h1', null, 'Cooperativa NFC'), h('p', { class: 'tag' }, 'Tiendita escolar con tarjeta'),
+      h('div', { class: 'logo' }, '🪪'), h('h1', null, 'Cooperativa NFC'), h('p', { class: 'tag' }, 'Tiendita escolar con tarjeta'), paused,
       field('Usuario, correo o teléfono', u), field('Contraseña', p), err,
       h('button', { class: 'btn primary lg block', type: 'submit' }, 'Entrar'),
       WEB ? h('div', { class: 'links' },
@@ -786,8 +820,23 @@
   // ======================================================================
   // ----- Superadministrador (Zuki Company): instituciones -----
   // ======================================================================
-  const SCHOOL_STATUS = { activa: 'Activa', prueba: 'En prueba', suspendida: 'Suspendida' };
+  const SCHOOL_STATUS = { prueba: 'Prueba', activa: 'Activa', pausada: 'Pausada' };
   const schoolBadge = (s) => h('span', { class: 'badge ' + s }, SCHOOL_STATUS[s] || s);
+  // ----- mensualidad (fechas AAAA-MM-DD, calendario de la Ciudad de México que calcula el servidor) -----
+  const ymdUtc = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+  const ymdAdd = (s, n) => new Date(ymdUtc(s) + n * 86400000).toISOString().slice(0, 10);
+  const ymdAddMonth = (s) => { const [y, m, d] = s.split('-').map(Number); const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate(); return new Date(Date.UTC(y, m, Math.min(d, last))).toISOString().slice(0, 10); };
+  const ymdDiff = (a, b) => Math.round((ymdUtc(b) - ymdUtc(a)) / 86400000);
+  function billingSummary(b) {
+    if (!b) return { text: '—', cls: '' };
+    if (b.stage === 'pausada') return { text: b.pause_reason === 'falta_pago' ? 'Pausada por falta de pago' : 'Pausada', cls: 'err' };
+    if (b.stage === 'tolerancia') return { text: `Vencida el ${ddmmyyyy(b.period_end)} · tolerancia: ${b.grace_days_left === 1 ? 'queda 1 día' : `quedan ${b.grace_days_left} días`}`, cls: 'err' };
+    if (b.stage === 'aviso') return { text: b.days_left === 0 ? `Vence hoy (${ddmmyyyy(b.period_end)})` : `Vence en ${diasTxt(b.days_left)} (${ddmmyyyy(b.period_end)})`, cls: 'warn' };
+    if (b.days_left === null || b.days_left === undefined) return { text: 'Sin fecha', cls: '' };
+    return { text: `Quedan ${diasTxt(b.days_left)} · hasta ${ddmmyyyy(b.period_end)}`, cls: 'ok' };
+  }
+  const billingCell = (b) => { const x = billingSummary(b); return h('span', { class: 'billtxt ' + x.cls }, x.text); };
+  const needsAttention = (b) => !!b && (b.stage === 'aviso' || b.stage === 'tolerancia' || (b.stage === 'pausada' && b.pause_reason === 'falta_pago'));
   async function superCall(method, args) {
     const r = await window.coop.superCall(method, args || {});
     if (!r.ok) { if (r.code === 'NO_AUTENTICADO') { state.user = null; render(); } throw new Error(r.error); }
@@ -800,21 +849,22 @@
     return fmtDate(s);
   };
   // Tabla que en celular se muestra como tarjetas (cada celda con su etiqueta)
-  function respTable(headers, rows) {
+  function respTable(headers, rows, rowClass) {
     return h('table', { class: 'resp' }, h('tr', { class: 'head' }, headers.map((x) => h('th', { class: x.right ? 'right' : '' }, x.label))),
-      rows.map((cells) => h('tr', null, cells.map((c, i) => h('td', { 'data-label': headers[i].label, class: headers[i].right ? 'right' : '' }, c)))));
+      rows.map((cells, r) => h('tr', { class: rowClass ? rowClass(r) || null : null }, cells.map((c, i) => h('td', { 'data-label': headers[i].label, class: headers[i].right ? 'right' : '' }, c)))));
   }
   const tempPassModal = (title, user, pass) => passShownModal(title, user, pass);
   function schoolForm(s) {
     const name = h('input', { value: s ? s.name : '', placeholder: 'p. ej. Colegio Juárez Morelia' });
-    const status = h('select', null, Object.entries(SCHOOL_STATUS).map(([k, l]) => h('option', { value: k, selected: (s ? s.status : 'prueba') === k }, l)));
+    // El estado de una escuela existente se cambia en el recuadro "Mensualidad"; aquí solo al crearla
+    const status = h('select', null, [['prueba', 'Prueba (30 días gratis)'], ['activa', 'Activa (1 mes pagado)']].map(([k, l]) => h('option', { value: k, selected: k === 'prueba' }, l)));
     const plan = h('textarea', { rows: 2, placeholder: 'p. ej. Plan anual $1,500 MXN/mes, pago el día 5' }); plan.value = s && s.plan_note ? s.plan_note : '';
     const cname = h('input', { value: s ? s.contact_name || '' : '' }); const cphone = h('input', { value: s ? s.contact_phone || '' : '', type: 'tel', placeholder: '10 dígitos' });
     const cemail = h('input', { value: s ? s.contact_email || '' : '', type: 'email' });
     const fields = { name, status, plan, cname, cphone, cemail };
-    const el = h('div', { class: 'form' }, field('Nombre de la escuela', name), h('div', { class: 'grid g2' }, field('Estado', status), field('Contacto (director/a)', cname)),
+    const el = h('div', { class: 'form' }, field('Nombre de la escuela', name), h('div', { class: 'grid g2' }, s ? null : field('Estado inicial', status), field('Contacto (director/a)', cname)),
       h('div', { class: 'grid g2' }, field('Teléfono de contacto', cphone), field('Correo de contacto', cemail)), field('Plan / cuota (nota interna)', plan));
-    const data = () => ({ name: name.value, status: status.value, plan_note: plan.value, contact_name: cname.value, contact_phone: cphone.value, contact_email: cemail.value });
+    const data = () => ({ name: name.value, ...(s ? {} : { status: status.value }), plan_note: plan.value, contact_name: cname.value, contact_phone: cphone.value, contact_email: cemail.value });
     return { el, data, fields };
   }
   function newSchoolModal() {
@@ -838,29 +888,32 @@
     const stat = statCard;
     const sec = await superCall('securityOverview').catch(() => null);
     const q = h('input', { placeholder: 'Buscar escuela…', class: 'grow' });
-    const fs = h('select', null, h('option', { value: '' }, 'Todos los estados'), Object.entries(SCHOOL_STATUS).map(([k, l]) => h('option', { value: k }, l)));
+    const fs = h('select', null, h('option', { value: '' }, 'Todos los estados'), Object.entries(SCHOOL_STATUS).map(([k, l]) => h('option', { value: k }, l)), h('option', { value: 'atencion' }, 'Por vencer, vencidas o pausadas'));
     const box = h('div');
     const draw = () => {
       const term = q.value.trim().toLowerCase();
-      const list = o.schools.filter((s) => (!fs.value || s.status === fs.value) && (!term || s.name.toLowerCase().includes(term)));
+      const list = o.schools.filter((s) => (!fs.value || (fs.value === 'atencion' ? needsAttention(s.billing) || s.status === 'pausada' : s.status === fs.value)) && (!term || s.name.toLowerCase().includes(term)));
       box.innerHTML = '';
       if (!list.length) { box.appendChild(h('div', { class: 'empty' }, 'Sin escuelas con ese filtro')); return; }
-      box.appendChild(respTable([{ label: 'Escuela' }, { label: 'Estado' }, { label: 'Alumnos', right: true }, { label: 'Tarjetas activas', right: true }, { label: 'Ventas del mes', right: true }, { label: 'Recargas del mes', right: true }, { label: 'Última sincronización' }, { label: '' }],
+      box.appendChild(respTable([{ label: 'Escuela' }, { label: 'Estado' }, { label: 'Mensualidad' }, { label: 'Alumnos', right: true }, { label: 'Tarjetas activas', right: true }, { label: 'Ventas del mes', right: true }, { label: 'Última sincronización' }, { label: '' }],
         list.map((s) => [
           h('div', null, h('b', null, s.name), s.plan_note ? h('div', { class: 'small muted' }, s.plan_note) : null),
-          schoolBadge(s.status), String(s.stats.students), String(s.stats.active_cards), money(s.stats.sales_month_cents), money(s.stats.recharges_month_cents),
+          schoolBadge(s.status), billingCell(s.billing), String(s.stats.students), String(s.stats.active_cards), money(s.stats.sales_month_cents),
           h('span', { class: s.stats.last_sync_at ? '' : 'muted' }, since(s.stats.last_sync_at), s.stats.devices ? h('span', { class: 'small muted' }, ` · ${s.stats.devices} caja(s)`) : null),
           h('button', { class: 'btn sm primary', onclick: () => go('institucion', { id: s.id }) }, 'Administrar'),
-        ])));
+        ]), (i) => { const b = list[i].billing; return b && (b.stage === 'tolerancia' || b.stage === 'pausada') ? 'row-err' : (b && b.stage === 'aviso' ? 'row-warn' : ''); }));
     };
+    const attention = o.schools.filter((s) => needsAttention(s.billing));
     q.addEventListener('input', draw); fs.addEventListener('change', draw);
     const P = sec && sec.persistence ? sec.persistence : {};
     put(main, pageHead('Escuelas', 'Todas las escuelas que usan la cooperativa. Toque “Administrar” para ver su personal, cajas y códigos.', h('button', { class: 'btn primary', onclick: newSchoolModal }, '+ Nueva escuela')),
       sec && sec.lockdown ? banner('red', '🚨', h('b', null, 'ALERTA ROJA ACTIVA. '), 'Todo está en solo lectura. ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('seguridad'); } }, 'Ir a Seguridad')) : null,
       P.mode === 'temporal' ? banner('warn', '⚠️', h('b', null, 'Los datos son temporales. '), 'El servidor gratuito borra todo al reiniciarse. Antes de usarlo con una escuela real configure el guardado permanente (vea la guía, sección “Guardar los datos”).') : null,
       sec && sec.open_alerts ? banner('info', '🔔', `Tiene ${sec.open_alerts} alerta(s) sin revisar. `, h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('alertas'); } }, 'Ver alertas')) : null,
+      attention.length ? banner('warn', '📅', h('div', null, h('b', null, `Mensualidades: ${attention.length} escuela(s) requieren atención`),
+        h('ul', { class: 'attn' }, attention.map((s) => h('li', null, h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('institucion', { id: s.id }); } }, s.name), ' — ', billingSummary(s.billing).text))))) : null,
       h('div', { class: 'grid g4 stats' },
-        stat('Escuelas', String(t.schools), `${t.schools_activa} activas · ${t.schools_prueba} en prueba · ${t.schools_suspendida} suspendidas`),
+        stat('Escuelas', String(t.schools), `${t.schools_activa} activas · ${t.schools_prueba} en prueba · ${t.schools_pausada} pausadas`),
         stat('Alumnos', String(t.students), `${t.tutors_linked} padres vinculados`),
         stat('Tarjetas activas', String(t.active_cards), `de ${t.total_cards} registradas`),
         stat('Cajas vinculadas', String(t.devices)),
@@ -872,6 +925,70 @@
     draw();
   };
 
+  // Recuadro "Mensualidad" de una escuela: estado, periodo, días restantes, botones e historial de pagos
+  function billingCard(s, payments) {
+    const b = s.billing || {}; const today = b.today; const sum = billingSummary(b);
+    const paused = s.status === 'pausada';
+    const pay = () => {
+      const date = h('input', { type: 'date', value: today }); const amt = h('input', { inputmode: 'decimal', placeholder: 'Opcional, p. ej. 1500' });
+      const note = h('input', { placeholder: 'Opcional, p. ej. Transferencia BBVA, recibo 123' });
+      const fresh = paused || !s.period_end || ymdDiff(today, s.period_end) < -2;
+      const newEnd = fresh ? ymdAddMonth(today) : ymdAddMonth(s.period_end);
+      modal('Registrar pago / renovar', h('div', { class: 'form' },
+        h('p', { style: { margin: 0 } }, 'Escuela: ', h('b', null, s.name)),
+        h('div', { class: 'grid g2' }, field('Fecha de pago', date), field('Monto (pesos)', amt)), field('Nota', note),
+        h('div', { class: 'banner ok small' }, h('span', { class: 'ico' }, '📅'), h('div', null, 'Se agrega 1 mes. Nuevo fin del periodo: ', h('b', null, ddmmyyyy(newEnd)),
+          fresh ? h('div', { class: 'small' }, paused ? 'La escuela estaba pausada: se reactiva y el mes empieza hoy.' : 'El periodo anterior ya había terminado: el mes empieza hoy.') : null,
+          s.status !== 'activa' && !paused ? h('div', { class: 'small' }, 'La escuela pasará de Prueba a Activa.') : null))),
+      [{ label: 'Cancelar' }, { label: 'Registrar pago', class: 'primary', onClick: async () => {
+        try {
+          const r = await superCall('registerPayment', { school_id: s.id, paid_at: date.value || undefined, amount_cents: amt.value.trim() ? toCents(amt.value) : undefined, note: note.value.trim() || undefined });
+          toast(`Pago registrado. Nuevo fin: ${ddmmyyyy(r.period_end)}${r.reactivated ? ' · escuela reactivada' : ''}`, 'ok'); render();
+        } catch (e) { toast(e.message, 'err'); return false; }
+      } }]);
+    };
+    const pauseNow = async () => {
+      if (!(await confirmBox('Pausar ahora', `Nadie de "${s.name}" (administrador, cajeros y padres) podrá entrar, se cerrarán sus sesiones y su caja dejará de cobrar al sincronizar. Los datos se conservan y puede reactivarla cuando quiera. ¿Pausar?`))) return;
+      const r = await safe(() => superCall('pauseSchool', { school_id: s.id }));
+      if (r) { toast(`Escuela pausada. Sesiones cerradas: ${r.sessions_closed}`, 'ok'); render(); }
+    };
+    const reactivate = () => {
+      const st = h('select', null, h('option', { value: 'activa', selected: payments.length > 0 }, 'Activa'), h('option', { value: 'prueba', selected: !payments.length }, 'Prueba'));
+      const end = h('input', { type: 'date', value: s.period_end && s.period_end >= today ? s.period_end : ymdAdd(today, 7), min: today });
+      modal('Reactivar escuela', h('div', { class: 'form' },
+        h('p', { style: { margin: 0 } }, `Las cuentas de "${s.name}" podrán volver a entrar de inmediato.`),
+        h('div', { class: 'grid g2' }, field('Estado', st), field('Fecha fin del periodo', end, 'Hasta qué día tiene servicio.')),
+        h('p', { class: 'small muted', style: { margin: 0 } }, 'Si ya pagó, mejor use “Registrar pago / renovar”: reactiva y deja el pago en el historial.')),
+      [{ label: 'Cancelar' }, { label: 'Reactivar', class: 'ok', onClick: async () => {
+        try { await superCall('reactivateSchool', { school_id: s.id, status: st.value, period_end: end.value }); toast('Escuela reactivada', 'ok'); render(); } catch (e) { toast(e.message, 'err'); return false; }
+      } }]);
+    };
+    const dates = () => {
+      const st = h('select', null, h('option', { value: 'prueba', selected: s.status === 'prueba' }, 'Prueba'), h('option', { value: 'activa', selected: s.status === 'activa' }, 'Activa'));
+      const ini = h('input', { type: 'date', value: s.period_start || today }); const fin = h('input', { type: 'date', value: s.period_end || ymdAdd(today, 30) });
+      modal('Cambiar estado y fechas', h('div', { class: 'form' }, field('Estado', st), h('div', { class: 'grid g2' }, field('Fecha inicio', ini), field('Fecha fin del periodo', fin)),
+        h('p', { class: 'small muted', style: { margin: 0 } }, 'Útil para alargar una prueba o corregir fechas. Para registrar un pago use “Registrar pago / renovar”.')),
+      [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
+        try { await superCall('setBillingPeriod', { school_id: s.id, status: st.value, period_start: ini.value, period_end: fin.value }); toast('Periodo actualizado', 'ok'); render(); } catch (e) { toast(e.message, 'err'); return false; }
+      } }]);
+    };
+    const payRows = payments.map((p) => [ddmmyyyy(p.paid_at), p.amount_cents ? money(p.amount_cents) : h('span', { class: 'muted' }, '—'), `${ddmmyyyy(p.period_start)} al ${ddmmyyyy(p.period_end)}`, p.note || h('span', { class: 'muted' }, '—'), p.created_by || '—']);
+    return h('div', { class: 'card billing-card ' + (sum.cls || ''), style: { marginBottom: '18px' } },
+      h('div', { class: 'row' }, h('h2', { class: 'grow', style: { margin: 0 } }, '📅 Mensualidad'), schoolBadge(s.status)),
+      h('div', { class: 'grid g3 billing-kv' },
+        h('div', null, h('div', { class: 'l' }, 'Estado'), h('div', { class: 'v' }, SCHOOL_STATUS[s.status] || s.status)),
+        h('div', null, h('div', { class: 'l' }, paused ? 'Pausada desde' : 'Periodo'), h('div', { class: 'v' }, paused ? fmtDate(s.paused_at) : `${ddmmyyyy(s.period_start)} al ${ddmmyyyy(s.period_end)}`)),
+        h('div', null, h('div', { class: 'l' }, paused ? 'Motivo' : 'Días restantes'), h('div', { class: 'v' }, paused ? (s.pause_reason === 'falta_pago' ? 'Falta de pago (automática)' : 'Pausada a mano') : billingCell(b)))),
+      b.stage === 'tolerancia' ? h('div', { class: 'small', style: { color: 'var(--err)', fontWeight: 600, marginTop: '10px' } }, `Si no se registra el pago, se pausará automáticamente el ${ddmmyyyy(b.pause_on)}.`) : null,
+      h('div', { class: 'row', style: { marginTop: '16px' } },
+        h('button', { class: 'btn primary', onclick: pay }, '💵 Registrar pago / renovar'),
+        paused ? h('button', { class: 'btn ok', onclick: reactivate }, '▶️ Reactivar') : h('button', { class: 'btn danger', onclick: pauseNow }, '⏸️ Pausar ahora'),
+        paused ? null : h('button', { class: 'btn', onclick: dates }, '✏️ Cambiar estado o fechas')),
+      h('h3', { style: { marginTop: '22px' } }, 'Historial de pagos'),
+      payRows.length ? respTable([{ label: 'Fecha de pago' }, { label: 'Monto' }, { label: 'Periodo cubierto' }, { label: 'Nota' }, { label: 'Registró' }], payRows)
+        : h('div', { class: 'empty', style: { padding: '16px' } }, 'Aún no hay pagos registrados.'));
+  }
+
   VIEWS.institucion = async (main, params) => {
     const d = await superCall('schoolDetail', { id: params.id });
     const s = d.school; const st = s.stats;
@@ -882,11 +999,7 @@
         try { await superCall('updateSchool', { id: s.id, ...f.data() }); toast('Escuela actualizada', 'ok'); render(); } catch (e) { toast(e.message, 'err'); return false; }
       } }]);
     };
-    const setStatus = async (status) => {
-      const txt = status === 'suspendida' ? 'El personal de la escuela no podrá entrar y su caja dejará de sincronizar. Los padres seguirán viendo saldos e historial. ¿Suspender?' : `¿Cambiar el estado a "${SCHOOL_STATUS[status]}"?`;
-      if (!(await confirmBox(status === 'suspendida' ? 'Suspender escuela' : 'Cambiar estado', txt))) return;
-      if (await safe(() => superCall('updateSchool', { id: s.id, status }))) { toast('Estado actualizado', 'ok'); render(); }
-    };
+    const billCard = billingCard(s, d.payments || []);
     const newStaff = () => {
       const role = h('select', null, h('option', { value: 'admin' }, 'Administrador'), h('option', { value: 'cajero' }, 'Cajero'));
       const u = h('input', { autocomplete: 'off' }); const n = h('input'); const e = h('input', { type: 'email', placeholder: 'Opcional' });
@@ -918,10 +1031,8 @@
     put(main,
       h('div', { style: { marginBottom: '10px' } }, h('button', { class: 'btn ghost', onclick: () => go('instituciones') }, '← Volver a escuelas')),
       pageHead(s.name, [s.contact_name, s.contact_phone, s.contact_email].filter(Boolean).join(' · ') || 'Datos de la escuela', schoolBadge(s.status)),
-      h('div', { class: 'row', style: { marginBottom: '18px', flexWrap: 'wrap' } }, h('button', { class: 'btn', onclick: edit }, '✏️ Editar datos y plan'), h('button', { class: 'btn', onclick: () => go('seguridad') }, '🛡️ Seguridad de esta escuela'),
-        s.status !== 'activa' ? h('button', { class: 'btn ok', onclick: () => setStatus('activa') }, 'Activar') : null,
-        s.status !== 'prueba' ? h('button', { class: 'btn', onclick: () => setStatus('prueba') }, 'Pasar a prueba') : null,
-        s.status !== 'suspendida' ? h('button', { class: 'btn danger', onclick: () => setStatus('suspendida') }, 'Suspender') : null),
+      h('div', { class: 'row', style: { marginBottom: '18px', flexWrap: 'wrap' } }, h('button', { class: 'btn', onclick: edit }, '✏️ Editar datos y plan'), h('button', { class: 'btn', onclick: () => go('seguridad') }, '🛡️ Seguridad de esta escuela')),
+      billCard,
       h('div', { class: 'grid g4 stats' },
         stat('Alumnos', String(st.students), `${st.tutors_linked} padres vinculados`), stat('Tarjetas activas', String(st.active_cards), `de ${st.total_cards}`),
         stat('Ventas de hoy', money(st.sales_day_cents)), stat('Ventas del mes', money(st.sales_month_cents), `${st.sales_month_count} ventas · total ${money(st.sales_total_cents)}`),
@@ -1092,6 +1203,7 @@
   function accountState(u) {
     if (!u.active) return badge('desactivada', 'err');
     if (u.locked) return badge('bloqueada por intentos', 'warn');
+    if (u.role !== 'superadmin' && u.school_status === 'pausada') return h('span', { title: 'La escuela está pausada (mensualidad): esta cuenta no puede entrar' }, badge('escuela pausada', 'err'));
     return badge('activa', 'ok');
   }
   function setPasswordModal(u) {
@@ -1108,8 +1220,9 @@
     const o = await superCall('overview');
     const q = h('input', { placeholder: 'Nombre, usuario, correo o teléfono' });
     const role = h('select', null, h('option', { value: '' }, 'Todas'), ['superadmin', 'admin', 'cajero', 'tutor'].map((r) => h('option', { value: r }, ROLE_ORDER_LABEL[r])));
-    const school = h('select', null, h('option', { value: '' }, 'Todas'), o.schools.map((s) => h('option', { value: s.id }, s.name)));
+    const school = h('select', null, h('option', { value: '' }, 'Todas'), o.schools.map((s) => h('option', { value: s.id }, s.name + (s.status === 'pausada' ? ' (pausada)' : ''))));
     const status = h('select', null, h('option', { value: '' }, 'Todas'), h('option', { value: 'activas' }, 'Activas'), h('option', { value: 'bloqueadas' }, 'Desactivadas o bloqueadas'));
+    const pausedSchools = o.schools.filter((s) => s.status === 'pausada');
     const box = h('div', { class: 'card tablewrap' });
     const load = async () => {
       const list = await superCall('listAccounts', { q: q.value.trim() || undefined, role: role.value || undefined, school_id: school.value || undefined, status: status.value || undefined });
@@ -1139,6 +1252,8 @@
     [role, school, status].forEach((x) => x.addEventListener('change', load));
     put(main, pageHead('Cuentas', 'Todas las personas que pueden entrar al sistema, de todas las escuelas. Solo usted puede cambiar contraseñas.'),
       banner('info', '🔑', 'Por seguridad las contraseñas se guardan cifradas y no se pueden ver. Use ', h('b', null, '“Contraseña”'), ' para asignar una nueva: se mostrará una sola vez para que la copie y se la entregue a la persona.'),
+      pausedSchools.length ? banner('err', '⏸️', h('div', null, h('b', null, 'Escuelas pausadas por mensualidad: '), pausedSchools.map((s, i) => [i ? ', ' : '', h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('institucion', { id: s.id }); } }, s.name)]),
+        h('div', { class: 'small' }, 'Sus cuentas (administrador, cajeros y padres) no pueden entrar hasta que la reactive.'))) : null,
       h('div', { class: 'card filters' }, field('Buscar', q), field('Jerarquía', role), field('Escuela', school), field('Estado', status)), box);
     await load();
   };
@@ -1273,7 +1388,8 @@
   // ======================================================================
   const ALERT_LABEL = { recarga_grande: 'Recarga grande', muchas_recargas: 'Muchas recargas seguidas del mismo usuario', recargas_repetidas: 'Varias recargas a la misma tarjeta',
     fuera_de_horario: 'Recarga fuera de horario', auto_recarga: 'Posible auto-recarga (padre/alumno)', limite_diario: 'Límite diario superado', borrado: 'Borrado',
-    intentos_fallidos: 'Intentos de acceso fallidos', cuenta_bloqueada: 'Cuenta bloqueada por intentos', alerta_roja: 'Alerta roja', superadmin_recuperado: 'Recuperación de superadmin' };
+    intentos_fallidos: 'Intentos de acceso fallidos', cuenta_bloqueada: 'Cuenta bloqueada por intentos', alerta_roja: 'Alerta roja', superadmin_recuperado: 'Recuperación de superadmin',
+    mensualidad_por_vencer: 'Mensualidad por vencer', mensualidad_tolerancia: 'Mensualidad vencida (tolerancia)', mensualidad_pausada: 'Escuela pausada' };
   const SEV_LABEL = { critica: 'Crítica', alta: 'Alta', media: 'Media', aviso: 'Aviso', info: 'Info', baja: 'Baja' };
   const sevBadge = (s) => h('span', { class: 'badge ' + (s || 'info') }, SEV_LABEL[s] || s || 'Info');
   VIEWS.alertas = async (main) => {
@@ -1306,12 +1422,15 @@
     rol_cambiado: 'Cambio de rol', cuenta_activada: 'Cuenta activada', cuenta_desactivada: 'Cuenta desactivada', usuario_creado: 'Cuenta creada', usuario_editado: 'Cuenta editada', cuenta_desbloqueada: 'Cuenta desbloqueada',
     login: 'Inicio de sesión', login_fallido: 'Contraseña incorrecta', cuenta_bloqueada_intentos: 'Bloqueo por intentos', login_rechazado_bloqueo: 'Acceso rechazado (bloqueo)',
     alerta_roja: 'ALERTA ROJA', alerta_roja_fin: 'Fin de alerta roja', congelar_recargas: 'Congelar recargas', congelar_ventas: 'Congelar ventas', solo_lectura: 'Solo lectura', cerrar_sesiones: 'Cerrar sesiones',
-    bloquear_admin: 'Bloquear administradores', limites_escuela: 'Límites de escuela', respaldo_descargado: 'Respaldo descargado' };
+    bloquear_admin: 'Bloquear administradores', limites_escuela: 'Límites de escuela', respaldo_descargado: 'Respaldo descargado',
+    mensualidad_pago: 'Pago de mensualidad', mensualidad_periodo: 'Periodo de mensualidad', mensualidad_por_vencer: 'Mensualidad por vencer', mensualidad_tolerancia: 'Mensualidad vencida (tolerancia)',
+    escuela_pausada: 'Escuela pausada', escuela_pausada_auto: 'Escuela pausada por falta de pago', escuela_reactivada: 'Escuela reactivada', login_rechazado_pausa: 'Acceso rechazado (escuela pausada)',
+    escuela_creada: 'Escuela creada', escuela_editada: 'Escuela editada' };
   const detailsText = (d) => (!d ? '' : typeof d === 'string' ? d : Object.entries(d).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : (k === 'monto' ? money(v) : v)}`).join(' · '));
   VIEWS.bitacora = async (main) => {
     const o = await superCall('overview');
     const from = h('input', { type: 'date' }); const to = h('input', { type: 'date' }); const q = h('input', { placeholder: 'Persona, IP, tarjeta…' });
-    const cat = h('select', null, h('option', { value: '' }, 'Todo'), [['recargas', 'Recargas'], ['borrados', 'Borrados'], ['contrasenas', 'Contraseñas'], ['roles', 'Cuentas y roles'], ['accesos', 'Accesos'], ['emergencia', 'Emergencia']].map(([v, l]) => h('option', { value: v }, l)));
+    const cat = h('select', null, h('option', { value: '' }, 'Todo'), [['recargas', 'Recargas'], ['borrados', 'Borrados'], ['contrasenas', 'Contraseñas'], ['roles', 'Cuentas y roles'], ['accesos', 'Accesos'], ['mensualidad', 'Mensualidad'], ['emergencia', 'Emergencia']].map(([v, l]) => h('option', { value: v }, l)));
     const school = h('select', null, h('option', { value: '' }, 'Todas'), o.schools.map((s) => h('option', { value: s.id }, s.name)));
     const box = h('div', { class: 'card tablewrap' });
     const load = async () => {
@@ -1392,8 +1511,8 @@
   }
 
   // ---------- indicador de sincronización (escritorio) ----------
-  const SYNC_LABEL = { desactivado: 'Solo local (sin servidor)', pendiente: 'Sincronización pendiente', sincronizando: 'Sincronizando…', ok: 'Sincronizado', solo_lectura: 'Solo lectura (no es el equipo principal)', sin_conexion: 'Sin conexión', conflicto: 'Otro equipo es el principal', error: 'Error de sincronización' };
-  const SYNC_COLOR = { ok: '#22c55e', sincronizando: '#60a5fa', pendiente: '#fbbf24', sin_conexion: '#f59e0b', solo_lectura: '#a78bfa', conflicto: '#ef4444', error: '#ef4444', desactivado: '#64748b' };
+  const SYNC_LABEL = { desactivado: 'Solo local (sin servidor)', pendiente: 'Sincronización pendiente', sincronizando: 'Sincronizando…', ok: 'Sincronizado', solo_lectura: 'Solo lectura (no es el equipo principal)', sin_conexion: 'Sin conexión', conflicto: 'Otro equipo es el principal', error: 'Error de sincronización', pausado: 'Servicio pausado' };
+  const SYNC_COLOR = { ok: '#22c55e', sincronizando: '#60a5fa', pendiente: '#fbbf24', sin_conexion: '#f59e0b', solo_lectura: '#a78bfa', conflicto: '#ef4444', error: '#ef4444', pausado: '#ef4444', desactivado: '#64748b' };
   const hhmm = (iso) => { if (!iso) return ''; const d = new Date(iso); return d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }); };
   const fullDate = (iso) => (iso ? new Date(iso).toLocaleString('es-MX') : 'nunca');
   let lastSync = null;
@@ -1417,5 +1536,5 @@
   }
 
   // ---------- inicio ----------
-  (async () => { const r = await window.coop.call('me'); state.user = r.ok ? r.data : null; render(); })();
+  (async () => { const r = await window.coop.call('me'); state.user = r.ok ? r.data : null; if (!r.ok && r.code === 'ESCUELA_PAUSADA') state.pausedMsg = r.error; render(); })();
 })();

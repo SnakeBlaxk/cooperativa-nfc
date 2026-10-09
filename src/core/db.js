@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
+const { mxDate, addDays, TRIAL_DAYS } = require('./billing');
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -12,14 +13,33 @@ CREATE TABLE IF NOT EXISTS schools (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   uuid TEXT UNIQUE,
   name TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'activa' CHECK (status IN ('activa','prueba','suspendida')),
+  status TEXT NOT NULL DEFAULT 'prueba' CHECK (status IN ('activa','prueba','pausada')),
   plan_note TEXT,
   contact_name TEXT,
   contact_phone TEXT,
   contact_email TEXT,
   primary_device_id TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  period_start TEXT,
+  period_end TEXT,
+  paused_at TEXT,
+  pause_reason TEXT,
+  billing_notice TEXT
 );
+-- Mensualidad: historial de pagos por escuela (servidor)
+CREATE TABLE IF NOT EXISTS school_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  school_id INTEGER NOT NULL REFERENCES schools(id),
+  paid_at TEXT NOT NULL,
+  amount_cents INTEGER,
+  note TEXT,
+  period_start TEXT,
+  period_end TEXT,
+  prev_end TEXT,
+  created_at TEXT NOT NULL,
+  created_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_school_payments ON school_payments(school_id, id);
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   uuid TEXT,
@@ -247,16 +267,30 @@ class Database {
     const colsOf = (t) => this.all(`PRAGMA table_info(${t})`).map((c) => c.name);
     const sqlOf = (t) => (this.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", [t]) || {}).sql || '';
     // Reconstruye una tabla con la definición nueva conservando los datos (para cambiar CHECK/UNIQUE)
-    const rebuild = (t) => {
+    // exprs: expresión SQL opcional por columna para transformar valores al copiar
+    const rebuild = (t, exprs = {}) => {
       const def = TABLE_DEFS[t];
       const oldCols = colsOf(t);
       this.db.exec(`PRAGMA foreign_keys = OFF; DROP TABLE IF EXISTS ${t}__new;`);
       this.db.exec(def.replace(`CREATE TABLE IF NOT EXISTS ${t} (`, `CREATE TABLE ${t}__new (`));
-      const common = colsOf(`${t}__new`).filter((c) => oldCols.includes(c)).join(', ');
-      this.db.exec(`INSERT INTO ${t}__new (${common}) SELECT ${common} FROM ${t}; DROP TABLE ${t}; ALTER TABLE ${t}__new RENAME TO ${t}; PRAGMA foreign_keys = ON;`);
+      const commonCols = colsOf(`${t}__new`).filter((c) => oldCols.includes(c));
+      const common = commonCols.join(', ');
+      const select = commonCols.map((c) => exprs[c] || c).join(', ');
+      this.db.exec(`INSERT INTO ${t}__new (${common}) SELECT ${select} FROM ${t}; DROP TABLE ${t}; ALTER TABLE ${t}__new RENAME TO ${t}; PRAGMA foreign_keys = ON;`);
     };
     if (!sqlOf('users').includes('superadmin')) rebuild('users');
     if (!sqlOf('categories').includes('UNIQUE (school_id, name)')) rebuild('categories');
+    // Mensualidad: el estado "suspendida" pasa a llamarse "pausada" (se conservan todos los datos de la escuela)
+    if (!sqlOf('schools').includes("'pausada'")) rebuild('schools', { status: "CASE WHEN status = 'suspendida' THEN 'pausada' WHEN status IN ('activa','prueba','pausada') THEN status ELSE 'prueba' END" });
+    for (const c of ['period_start', 'period_end', 'paused_at', 'pause_reason', 'billing_notice']) if (!colsOf('schools').includes(c)) this.db.exec(`ALTER TABLE schools ADD COLUMN ${c} TEXT`);
+    // Escuelas existentes al introducir la mensualidad: quedan en PRUEBA por 30 días desde hoy (hora de la
+    // Ciudad de México) para que ninguna se pause de forma inesperada. Las que estaban suspendidas siguen pausadas.
+    if (!this.get("SELECT value FROM meta WHERE key = 'billing_v1'")) {
+      const t = mxDate();
+      this.db.run("UPDATE schools SET status = 'prueba', period_start = ?, period_end = ? WHERE status <> 'pausada'", [t, addDays(t, TRIAL_DAYS)]);
+      this.db.run("UPDATE schools SET paused_at = COALESCE(paused_at, datetime('now','localtime')), pause_reason = COALESCE(pause_reason, 'manual') WHERE status = 'pausada'");
+      this.db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('billing_v1', ?)", [t]);
+    }
     const add = (t, c, def) => { if (!colsOf(t).includes(c)) this.db.exec(`ALTER TABLE ${t} ADD COLUMN ${c} ${def}`); };
     add('users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0');
     add('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');

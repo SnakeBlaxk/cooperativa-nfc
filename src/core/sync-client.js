@@ -26,7 +26,7 @@ function createSyncClient({ db, getConfig, fetchImpl = globalThis.fetch, timeout
     const cfg = getConfig();
     if (!cfg.serverUrl || !cfg.deviceToken) status.state = status.state === 'sincronizando' ? status.state : 'desactivado';
     else if (status.state === 'desactivado') status.state = 'pendiente';
-    return { ...status, pending: pendingCount(), last_sync_at: status.last_sync_at || meta('sync_last_at'), device_id: deviceId(), server_url: cfg.serverUrl || null, linked: !!cfg.deviceToken, school_name: meta('linked_school_name') };
+    return { ...status, paused: meta('server_paused') === '1', pending: pendingCount(), last_sync_at: status.last_sync_at || meta('sync_last_at'), device_id: deviceId(), server_url: cfg.serverUrl || null, linked: !!cfg.deviceToken, school_name: meta('linked_school_name') };
   }
 
   async function http(cfg, method, path, body, headers = {}) {
@@ -193,6 +193,9 @@ function createSyncClient({ db, getConfig, fetchImpl = globalThis.fetch, timeout
       if (st.school_name) rememberSchool(st.school_uuid, st.school_name);
       // Banderas de seguridad del servidor (congelar recargas/ventas, solo lectura, ALERTA ROJA)
       if (st.security) setMeta('server_security', JSON.stringify(st.security));
+      // Mensualidad: el servidor aceptó al equipo, así que la escuela no está pausada; se guarda el aviso de vencimiento
+      setMeta('server_paused', '0');
+      setMeta('server_billing', st.billing ? JSON.stringify(st.billing) : null);
       const p = await http(cfg, 'GET', '/api/sync/pull?cursor=' + encodeURIComponent(meta('sync_pull_cursor') || 0));
       const applied = applyPull(p.changes);
       setMeta('sync_pull_cursor', p.cursor);
@@ -208,7 +211,12 @@ function createSyncClient({ db, getConfig, fetchImpl = globalThis.fetch, timeout
       const uidc = pushed && pushed.uid_conflicts && pushed.uid_conflicts.length ? `Tarjetas ya registradas en otra escuela (no se enviaron): ${pushed.uid_conflicts.join(', ')}` : null;
       emit({ state: st.is_primary ? 'ok' : 'solo_lectura', last_sync_at: now, last_error: st.is_primary ? uidc : 'Este equipo no es el principal: solo descarga ajustes (sus ventas no se envían).', last_stats: { pulled: applied, ...(pushed || {}) } });
     } catch (e) {
-      const state = e.offline ? 'sin_conexion' : (e.code === 'OTRO_EQUIPO_PRINCIPAL' ? 'conflicto' : 'error');
+      // Escuela pausada por mensualidad: la caja deja de vender y recargar hasta que se reactive (se revisa en cada sincronización)
+      if (e.code === 'ESCUELA_PAUSADA' || e.code === 'ESCUELA_SUSPENDIDA') {
+        setMeta('server_paused', '1');
+        setMeta('server_billing', JSON.stringify({ stage: 'pausada', status: 'pausada' }));
+      }
+      const state = e.offline ? 'sin_conexion' : (e.code === 'OTRO_EQUIPO_PRINCIPAL' ? 'conflicto' : (meta('server_paused') === '1' && (e.code === 'ESCUELA_PAUSADA' || e.code === 'ESCUELA_SUSPENDIDA') ? 'pausado' : 'error'));
       emit({ state, last_error: e.message });
     }
     return getStatus();
@@ -251,7 +259,10 @@ function createSyncClient({ db, getConfig, fetchImpl = globalThis.fetch, timeout
     return { ok: true };
   }
 
-  return { syncNow, getStatus, linkDevice, makePrimary, requestInvitations, deviceId, applyPull, pendingCount };
+  // ¿La escuela quedó pausada en la última sincronización? (bloquea ventas y recargas en la caja)
+  const isPaused = () => meta('server_paused') === '1';
+  const billingNotice = () => { try { return JSON.parse(meta('server_billing') || 'null'); } catch (_) { return null; } };
+  return { isPaused, billingNotice, syncNow, getStatus, linkDevice, makePrimary, requestInvitations, deviceId, applyPull, pendingCount };
 }
 
 module.exports = { createSyncClient };

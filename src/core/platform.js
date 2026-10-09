@@ -5,7 +5,7 @@ const { AppError, fmtLocal, str, normEmail, normPhone } = require('./service');
 const { DEFAULT_CATEGORIES } = require('./seed');
 const crypto = require('crypto');
 
-const STATUSES = ['activa', 'prueba', 'suspendida'];
+const { STATUSES, isYmd } = require('./billing');
 function tempPassword() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   const b = crypto.randomBytes(10); let s = '';
@@ -13,7 +13,7 @@ function tempPassword() {
   return s;
 }
 
-function createPlatform(db, { svc, sync, auth, security = null, now = () => new Date() } = {}) {
+function createPlatform(db, { svc, sync, auth, security = null, billing = null, now = () => new Date() } = {}) {
   const ts = () => fmtLocal(now());
   const need = (actor) => { if (!actor || actor.role !== 'superadmin') throw new AppError('Solo el superadministrador puede hacer esto', 'PROHIBIDO'); };
   const getSchool = (id) => {
@@ -43,7 +43,11 @@ function createPlatform(db, { svc, sync, auth, security = null, now = () => new 
       staff: q("SELECT COUNT(*) AS n FROM users WHERE school_id = ? AND role IN ('admin','cajero') AND active = 1").n,
     };
   }
-  const schoolOut = (s) => ({ ...s, stats: statsOf(s.id) });
+  // Cada escuela incluye su mensualidad (estado, periodo, días restantes y etapa: ok/aviso/tolerancia/pausada)
+  const schoolOut = (s) => {
+    if (billing) { billing.evaluate(s.id); s = db.get('SELECT * FROM schools WHERE id = ?', [s.id]); }
+    return { ...s, billing: billing ? billing.info(s) : null, stats: statsOf(s.id) };
+  };
 
   function overview(actor) {
     need(actor);
@@ -52,6 +56,7 @@ function createPlatform(db, { svc, sync, auth, security = null, now = () => new 
     const totals = Object.fromEntries(keys.map((k) => [k, schools.reduce((a, s) => a + (s.stats[k] || 0), 0)]));
     totals.schools = schools.length;
     for (const st of STATUSES) totals['schools_' + st] = schools.filter((s) => s.status === st).length;
+    totals.schools_attention = schools.filter((s) => s.billing && ['aviso', 'tolerancia'].includes(s.billing.stage)).length;
     return { schools, totals };
   }
 
@@ -59,8 +64,9 @@ function createPlatform(db, { svc, sync, auth, security = null, now = () => new 
     const g = (k, label, o) => (data[k] !== undefined ? str(data[k], label, { optional: true, ...o }) : (prev[k] === undefined ? null : prev[k]));
     const name = data.name !== undefined ? str(data.name, 'nombre de la escuela', { max: 120 }) : prev.name;
     if (!name) throw new AppError('El campo "nombre de la escuela" es obligatorio', 'VALIDACION');
-    const status = data.status !== undefined ? data.status : (prev.status || 'prueba');
-    if (!STATUSES.includes(status)) throw new AppError('Estado inválido (activa, prueba o suspendida)', 'VALIDACION');
+    let status = data.status !== undefined ? data.status : (prev.status || 'prueba');
+    if (status === 'suspendida') status = 'pausada'; // nombre anterior
+    if (!STATUSES.includes(status)) throw new AppError('Estado inválido (prueba, activa o pausada)', 'VALIDACION');
     const contact_email = data.contact_email !== undefined ? (data.contact_email ? normEmail(data.contact_email) : null) : (prev.contact_email || null);
     let contact_phone = prev.contact_phone || null;
     if (data.contact_phone !== undefined) {
@@ -84,8 +90,15 @@ function createPlatform(db, { svc, sync, auth, security = null, now = () => new 
     const d = schoolData(data);
     return db.transaction(() => {
       if (db.get('SELECT id FROM schools WHERE lower(name) = lower(?)', [d.name])) throw new AppError('Ya existe una escuela con ese nombre', 'DUPLICADO');
-      const sid = db.run('INSERT INTO schools (name, status, plan_note, contact_name, contact_phone, contact_email, created_at) VALUES (?,?,?,?,?,?,?)',
-        [d.name, d.status, d.plan_note, d.contact_name, d.contact_phone, d.contact_email, ts()]).lastId;
+      // Mensualidad: una escuela nueva empieza en Prueba por 30 días (o Activa por un mes) desde hoy
+      if (d.status === 'pausada') throw new AppError('Una escuela nueva debe empezar en Prueba o Activa', 'VALIDACION');
+      const per = billing ? billing.defaultPeriod(d.status) : { period_start: null, period_end: null };
+      if (data.period_end) {
+        if (!isYmd(String(data.period_end)) || String(data.period_end) < per.period_start) throw new AppError('Fecha fin inválida', 'VALIDACION');
+        per.period_end = String(data.period_end);
+      }
+      const sid = db.run('INSERT INTO schools (name, status, plan_note, contact_name, contact_phone, contact_email, created_at, period_start, period_end) VALUES (?,?,?,?,?,?,?,?,?)',
+        [d.name, d.status, d.plan_note, d.contact_name, d.contact_phone, d.contact_email, ts(), per.period_start, per.period_end]).lastId;
       for (const n of DEFAULT_CATEGORIES) db.run('INSERT INTO categories (school_id, name) VALUES (?, ?)', [sid, n]);
       const admin = makeStaff(sid, { role: 'admin', username: data.admin_username, full_name: data.admin_full_name || `Administrador ${d.name}`, email: data.admin_email, phone: data.admin_phone });
       return { school: schoolOut(getSchool(sid)), admin };
@@ -96,14 +109,16 @@ function createPlatform(db, { svc, sync, auth, security = null, now = () => new 
     const prev = getSchool(id);
     const d = schoolData(data, prev);
     if (db.get('SELECT id FROM schools WHERE lower(name) = lower(?) AND id <> ?', [d.name, prev.id])) throw new AppError('Ya existe una escuela con ese nombre', 'DUPLICADO');
-    db.transaction(() => {
-      db.run('UPDATE schools SET name=?, status=?, plan_note=?, contact_name=?, contact_phone=?, contact_email=? WHERE id=?',
-        [d.name, d.status, d.plan_note, d.contact_name, d.contact_phone, d.contact_email, prev.id]);
-      // Suspender cierra las sesiones del personal de esa escuela
-      if (d.status === 'suspendida' && prev.status !== 'suspendida') {
-        db.run("UPDATE users SET token_version = token_version + 1 WHERE school_id = ? AND role IN ('admin','cajero')", [prev.id]);
-      }
-    });
+    const prevStatus = prev.status === 'suspendida' ? 'pausada' : prev.status;
+    db.run('UPDATE schools SET name=?, plan_note=?, contact_name=?, contact_phone=?, contact_email=? WHERE id=?',
+      [d.name, d.plan_note, d.contact_name, d.contact_phone, d.contact_email, prev.id]);
+    // El estado se cambia con las reglas de la mensualidad (pausar cierra sesiones; reactivar da un periodo vigente)
+    if (d.status !== prevStatus) {
+      if (!billing) db.run('UPDATE schools SET status = ? WHERE id = ?', [d.status, prev.id]);
+      else if (d.status === 'pausada') billing.pause(prev.id, { reason: 'manual', actor });
+      else if (prevStatus === 'pausada') billing.reactivate(actor, { school_id: prev.id, status: d.status });
+      else db.run('UPDATE schools SET status = ? WHERE id = ?', [d.status, prev.id]);
+    }
     return schoolOut(getSchool(prev.id));
   }
   function schoolDetail(actor, id) {
@@ -111,6 +126,7 @@ function createPlatform(db, { svc, sync, auth, security = null, now = () => new 
     const s = getSchool(id);
     return {
       school: schoolOut(s),
+      payments: billing ? billing.listPayments(actor, s.id) : [],
       staff: db.all("SELECT * FROM users WHERE school_id = ? AND role IN ('admin','cajero') ORDER BY role, full_name", [s.id]).map(svc.publicUser),
       devices: sync.listDevices(actor, s.id),
       invitations: auth.listInvitations(actor, { school_id: s.id }).slice(0, 100),
@@ -176,10 +192,12 @@ function createPlatform(db, { svc, sync, auth, security = null, now = () => new 
   // Acciones del panel que quedan en la bitácora
   const AUDITED = { createSchool: 'escuela_creada', updateSchool: 'escuela_editada', createStaff: 'usuario_creado', resetStaffPassword: 'contrasena_asignada', setStaffActive: 'cuenta_activada', revokeDevice: 'caja_revocada', setPrimaryDevice: 'caja_principal', generateInvitations: 'codigos_generados' };
   const SEC = security ? security.methods : {};
+  const BILL = billing ? billing.methods : {}; // mensualidad (registran su propia bitácora)
   function handle(user, method, args, ctx = {}) {
     need(user);
     const a = args && typeof args === 'object' ? args : {};
     if (Object.prototype.hasOwnProperty.call(SEC, method)) return SEC[method](user, a, ctx);
+    if (Object.prototype.hasOwnProperty.call(BILL, method)) return BILL[method](user, a, ctx);
     const fn = Object.prototype.hasOwnProperty.call(M, method) ? M[method] : null;
     if (!fn) throw new AppError('Operación desconocida', 'NO_ENCONTRADO');
     const out = fn(user, a);
@@ -188,11 +206,11 @@ function createPlatform(db, { svc, sync, auth, security = null, now = () => new 
       if (method === 'setStaffActive' && !a.active) action = 'cuenta_desactivada';
       const sid = a.school_id || (method.endsWith('School') ? a.id : null) || (out && out.school && out.school.id) || (out && out.user && out.user.school_id) || null;
       const det = { ...a }; if (Array.isArray(det.child_ids)) det.child_ids = det.child_ids.length;
-      security.audit(user, action, { school_id: sid, ip: ctx.ip, target_type: a.user_id ? 'user' : (a.device_id ? 'device' : 'school'), target_id: a.user_id || a.device_id || sid, details: det, severity: ['resetStaffPassword', 'setStaffActive', 'revokeDevice'].includes(method) || (method === 'updateSchool' && a.status === 'suspendida') ? 'aviso' : 'info' });
+      security.audit(user, action, { school_id: sid, ip: ctx.ip, target_type: a.user_id ? 'user' : (a.device_id ? 'device' : 'school'), target_id: a.user_id || a.device_id || sid, details: det, severity: ['resetStaffPassword', 'setStaffActive', 'revokeDevice'].includes(method) || (method === 'updateSchool' && ['suspendida', 'pausada'].includes(a.status)) ? 'aviso' : 'info' });
     }
     return out;
   }
-  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: [...Object.keys(M), ...Object.keys(SEC)] };
+  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: [...Object.keys(M), ...Object.keys(SEC), ...Object.keys(BILL)] };
 }
 
 module.exports = { createPlatform, tempPassword };

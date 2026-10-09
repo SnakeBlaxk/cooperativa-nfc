@@ -68,7 +68,7 @@ En el servidor, con la cuenta del **superadministrador**:
 4. Pulse **Crear escuela**. Aparece la **contraseña** del administrador con un botón **Copiar**: se muestra una sola vez; entréguela a esa persona junto con el usuario y la dirección del servidor.
 5. El administrador de la escuela entra a la dirección del servidor con ese usuario y contraseña. **Solo usted (superadministrador) puede cambiar contraseñas**: si alguien la olvida, vaya a **Cuentas → 🔑 Contraseña**.
 
-En **Escuelas → Administrar** puede después: editar datos y plan, **suspender** (si no paga) o **activar**, crear más usuarios (cajeros), asignar contraseñas nuevas, ver ventas, recargas, alumnos y la **última sincronización** de la caja, y revocar cajas.
+En **Escuelas → Administrar** puede después: editar datos y plan, llevar la **mensualidad** (registrar pago / renovar, pausar ahora, reactivar, ver historial de pagos; si no paga, la escuela se pausa sola 2 días después de vencer), crear más usuarios (cajeros), asignar contraseñas nuevas, ver ventas, recargas, alumnos y la **última sincronización** de la caja, y revocar cajas.
 
 ---
 
@@ -200,7 +200,7 @@ En la caja (cajero o administrador):
 | Problema | Qué hacer |
 |---|---|
 | El lector no lee | Desconecte y vuelva a conectar el USB. Haga clic en el campo de la tarjeta y acérquela de nuevo. |
-| Indicador rojo "Error de sincronización" | Pulse el indicador para reintentar. Si dice "suspendido", comuníquese con Zuki Company. |
+| Indicador rojo "Error de sincronización" | Pulse el indicador para reintentar. Si dice "Servicio pausado", la mensualidad no está al corriente: comuníquese con Zuki Company. Mientras esté pausada la caja no cobra ni recarga. |
 | "Otro equipo es el principal" | Hay otra caja de la escuela enviando datos. En Ajustes, con la cuenta del administrador de la escuela, pulse **Hacer principal** en la caja correcta. |
 | "Esa tarjeta ya está registrada en otra escuela" | Esa tarjeta pertenece a otra escuela; use otra tarjeta. |
 | Un papá olvidó su contraseña | Le pide una nueva a la escuela; el superadministrador la asigna en **Cuentas → 🔑 Contraseña**. |
