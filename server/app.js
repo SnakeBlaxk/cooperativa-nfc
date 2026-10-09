@@ -205,7 +205,17 @@ async function createServer(opts = {}) {
 
   // ----- PWA -----
   const renderer = path.join(__dirname, '..', 'src', 'renderer');
-  app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));
+  // iOS/Safari pide estas rutas por convención aunque el HTML declare otro ícono; si no existen
+  // muestra un ícono genérico al "Agregar a inicio".
+  app.get(['/apple-touch-icon-precomposed.png', '/apple-touch-icon-180x180.png', '/apple-touch-icon-180x180-precomposed.png'], (req, res) => res.sendFile(path.join(__dirname, 'public', 'apple-touch-icon.png')));
+  app.use(express.static(path.join(__dirname, 'public'), {
+    index: 'index.html',
+    setHeaders: (res, file) => {
+      if (/\.webmanifest$/.test(file)) res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+      // el service worker y el HTML siempre se revalidan para que los clientes reciban cambios
+      if (/(sw\.js|\.html)$/.test(file)) res.setHeader('Cache-Control', 'no-cache');
+    },
+  }));
   app.use(express.static(renderer, { index: false }));
   app.use('/api', (req, res) => res.status(404).json({ ok: false, error: 'Ruta no encontrada', code: 'NO_ENCONTRADO' }));
 
