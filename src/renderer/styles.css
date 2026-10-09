@@ -208,3 +208,4 @@ code { font-family: Consolas, "Courier New", monospace; background: #f1f4f9; pad
   table.resp-md .acts-wrap { flex-wrap: wrap; justify-content: flex-start !important; }
 }
 @media (max-width: 640px) { table.resp-md tr { grid-template-columns: 1fr; } }
+tr.unread td { background: #f3f7ff; } .cr-table td { vertical-align: top; } input[data-readonly] { background: #f4f5f7; color: var(--text, #222); cursor: not-allowed; }

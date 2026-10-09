@@ -212,6 +212,16 @@ async function createServer(opts = {}) {
         if (r.data && r.data.tutor_id !== prevTutor) sync.recordChild('child_link', Number(args.id));
       }
       try {
+        // Solicitudes de cambio de datos del alumno (tutor → escuela)
+        if (method === 'requestChildChange') {
+          const q = r.data;
+          security.audit(req.user, 'solicitud_cambio_datos', { school_id: q.school_id, ip: req.ip, target_type: 'child', target_id: q.child_id, details: { solicitud: q.id, alumno: q.child_name, dato: q.field_label, valor_actual: q.old_value, valor_nuevo: q.new_value, motivo: q.comment } });
+        } else if (method === 'resolveChangeRequest') {
+          const q = r.data.request;
+          if (r.data.applied) sync.recordChild('child_profile', Number(q.child_id));
+          security.audit(req.user, q.status === 'aprobada' ? 'solicitud_cambio_aprobada' : 'solicitud_cambio_rechazada', { ip: req.ip, target_type: 'child', target_id: q.child_id,
+            details: { solicitud: q.id, alumno: q.child_name, tutor: q.tutor_name, dato: q.field_label, valor_nuevo: q.new_value, aplicado: r.data.applied || null, motivo_rechazo: q.reject_reason || undefined }, severity: q.status === 'aprobada' && r.data.applied ? 'aviso' : 'info' });
+        }
         if (AUDIT_RPC[method] && !(method === 'updateProduct' && prevProduct && prevProduct.price_cents === r.data.price_cents && prevProduct.name === r.data.name && !!prevProduct.active === !!r.data.active)) {
           const det = { ...args };
           if (method === 'recharge' || method === 'adjust') { det.saldo_nuevo = r.data.balance_cents; det.transaccion = r.data.transaction_id; }
@@ -223,6 +233,13 @@ async function createServer(opts = {}) {
         if (method === 'recharge' && r.data.transaction_id) security.inspectRecharge(r.data.transaction_id);
       } catch (e) { console.error('[seguridad]', e); }
       return res.json(r);
+    }
+    // Tutor que intenta cambiar nombre o grado/grupo (solo los cambia la escuela): queda en la bitácora
+    if (method === 'updateChild' && req.user.role === 'tutor' && r.code === 'PROHIBIDO') {
+      try {
+        const ch = db.get('SELECT school_id FROM children WHERE id = ?', [Number(args.id) || 0]) || {};
+        security.audit(req.user, 'edicion_alumno_rechazada', { school_id: ch.school_id || null, ip: req.ip, target_type: 'child', target_id: args.id || null, details: { full_name: args.full_name, grade: args.grade }, severity: 'aviso' });
+      } catch (e) { console.error('[seguridad]', e); }
     }
     return res.status(STATUS[r.code] || 400).json(r);
   });

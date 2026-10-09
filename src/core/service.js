@@ -253,7 +253,15 @@ function createService(db, opts = {}) {
   }
   function updateChild(actor, id, data) {
     const c = assertChildAccess(actor, id, { write: true });
-    // El tutor puede personalizar nombre/foto de su hijo; solo admin cambia tutor o estado.
+    // El tutor solo puede cambiar la foto de su hijo. Nombre y grado/grupo los cambia la escuela
+    // (el tutor los pide con "Solicitar cambio de datos"). Solo admin cambia tutor o estado.
+    if (actor.role === 'tutor') {
+      const same = (a, b) => String(a === null || a === undefined ? '' : a).trim() === String(b === null || b === undefined ? '' : b).trim();
+      if ((data.full_name !== undefined && !same(data.full_name, c.full_name)) || (data.grade !== undefined && !same(data.grade, c.grade))) {
+        throw new AppError('El nombre y el grado/grupo solo los cambia la escuela. Use "Solicitar cambio de datos".', 'PROHIBIDO');
+      }
+      data = { photo: data.photo };
+    }
     const full_name = data.full_name !== undefined ? str(data.full_name, 'nombre del alumno') : c.full_name;
     const grade = data.grade !== undefined ? str(data.grade, 'grado/grupo', { optional: true, max: 30 }) : c.grade;
     const ph = validPhoto(data.photo);
@@ -266,6 +274,80 @@ function createService(db, opts = {}) {
     }
     db.run('UPDATE children SET full_name=?, grade=?, photo=?, tutor_id=?, active=? WHERE id=?', [full_name, grade, photo, tutor_id, active, c.id]);
     return childRow(db.get('SELECT * FROM children WHERE id = ?', [c.id]));
+  }
+
+  // ---------- solicitudes de cambio de datos del alumno (tutor → escuela) ----------
+  const CR_FIELDS = { nombre: 'Nombre', grado: 'Grado y grupo', otro: 'Otro' };
+  function crRow(r) {
+    if (!r) return null;
+    return { ...r, field_label: CR_FIELDS[r.field] || r.field, unread: !r.admin_read_at };
+  }
+  const CR_SELECT = `SELECT r.*, c.full_name AS child_name, c.grade AS child_grade, u.full_name AS tutor_name, u.phone AS tutor_phone, u.email AS tutor_email
+    FROM child_change_requests r LEFT JOIN children c ON c.id = r.child_id LEFT JOIN users u ON u.id = r.tutor_id`;
+  function requestChildChange(actor, data = {}) {
+    requireRole(actor, 'tutor');
+    const c = assertChildAccess(actor, data.child_id);
+    const field = String(data.field || '').trim().toLowerCase();
+    if (!CR_FIELDS[field]) throw new AppError('Indique qué dato quiere cambiar (Nombre, Grado y grupo u Otro)', 'VALIDACION');
+    const max = field === 'nombre' ? 120 : (field === 'grado' ? 30 : 200);
+    const new_value = str(data.new_value, 'valor nuevo', { optional: field === 'otro', max });
+    const comment = str(data.comment, 'motivo/comentario', { optional: true, max: 500 });
+    if (field === 'otro' && !new_value && !comment) throw new AppError('Describa el cambio que necesita', 'VALIDACION');
+    const old_value = field === 'nombre' ? c.full_name : (field === 'grado' ? c.grade : null);
+    if (field !== 'otro' && String(old_value || '').trim() === new_value) throw new AppError('El valor nuevo es igual al actual', 'VALIDACION');
+    const pending = db.get("SELECT COUNT(*) AS n FROM child_change_requests WHERE child_id = ? AND status = 'pendiente'", [c.id]).n;
+    if (pending >= 10) throw new AppError('Ya hay muchas solicitudes pendientes para este alumno. Espere la respuesta de la escuela.', 'VALIDACION');
+    const r = db.run('INSERT INTO child_change_requests (school_id, child_id, tutor_id, field, old_value, new_value, comment, status, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      [c.school_id, c.id, actor.id, field, old_value, new_value, comment, 'pendiente', ts()]);
+    return crRow(db.get(`${CR_SELECT} WHERE r.id = ?`, [r.lastId]));
+  }
+  function listChangeRequests(actor, f = {}) {
+    requireRole(actor, 'admin', 'tutor');
+    const w = []; const p = [];
+    if (actor.role === 'tutor') { w.push('r.tutor_id = ?'); p.push(actor.id); } else { w.push('r.school_id = ?'); p.push(sch(actor)); }
+    if (f.child_id) { w.push('r.child_id = ?'); p.push(int(f.child_id, 'alumno', { min: 1 })); }
+    if (f.status) { if (!['pendiente', 'aprobada', 'rechazada'].includes(f.status)) throw new AppError('Estado inválido', 'VALIDACION'); w.push('r.status = ?'); p.push(f.status); }
+    const rows = db.all(`${CR_SELECT} WHERE ${w.join(' AND ')} ORDER BY CASE r.status WHEN 'pendiente' THEN 0 ELSE 1 END, r.id DESC LIMIT 300`, p).map(crRow);
+    if (actor.role === 'tutor') for (const r of rows) { delete r.admin_read_at; delete r.unread; delete r.resolved_by; }
+    return rows;
+  }
+  function changeRequestsUnread(actor) {
+    requireRole(actor, 'admin');
+    const sid = sch(actor);
+    return {
+      unread: db.get('SELECT COUNT(*) AS n FROM child_change_requests WHERE school_id = ? AND admin_read_at IS NULL', [sid]).n,
+      pending: db.get("SELECT COUNT(*) AS n FROM child_change_requests WHERE school_id = ? AND status = 'pendiente'", [sid]).n,
+    };
+  }
+  function markChangeRequestsRead(actor) {
+    requireRole(actor, 'admin');
+    const r = db.run('UPDATE child_change_requests SET admin_read_at = ? WHERE school_id = ? AND admin_read_at IS NULL', [ts(), sch(actor)]);
+    return { marked: r.changes };
+  }
+  function resolveChangeRequest(actor, data = {}) {
+    requireRole(actor, 'admin');
+    const req = db.get('SELECT * FROM child_change_requests WHERE id = ? AND school_id = ?', [int(data.id, 'solicitud', { min: 1 }), sch(actor)]);
+    if (!req) throw new AppError('Solicitud no encontrada', 'NO_ENCONTRADO');
+    if (req.status !== 'pendiente') throw new AppError('Esta solicitud ya fue atendida', 'CONFLICTO');
+    const decision = data.decision === 'aprobar' || data.decision === 'aprobada' ? 'aprobada' : (data.decision === 'rechazar' || data.decision === 'rechazada' ? 'rechazada' : null);
+    if (!decision) throw new AppError('Indique si aprueba o rechaza la solicitud', 'VALIDACION');
+    const reason = decision === 'rechazada' ? str(data.reason, 'motivo del rechazo', { optional: true, max: 300 }) : null;
+    let applied = null;
+    return db.transaction(() => {
+      if (decision === 'aprobada' && req.field !== 'otro') {
+        const c = getChildOrFail(req.child_id, actor);
+        if (req.field === 'nombre') {
+          const v = str(req.new_value, 'nombre del alumno');
+          db.run('UPDATE children SET full_name = ? WHERE id = ?', [v, c.id]); applied = { field: 'nombre', before: c.full_name, after: v };
+        } else {
+          const v = str(req.new_value, 'grado/grupo', { optional: true, max: 30 });
+          db.run('UPDATE children SET grade = ? WHERE id = ?', [v, c.id]); applied = { field: 'grado', before: c.grade, after: v };
+        }
+      }
+      db.run('UPDATE child_change_requests SET status = ?, resolved_at = ?, resolved_by = ?, resolved_by_name = ?, reject_reason = ?, admin_read_at = COALESCE(admin_read_at, ?) WHERE id = ?',
+        [decision, ts(), actor.id, actor.full_name || actor.username || null, reason, ts(), req.id]);
+      return { request: crRow(db.get(`${CR_SELECT} WHERE r.id = ?`, [req.id])), applied };
+    });
   }
 
   // ---------- categorías y productos ----------
@@ -756,6 +838,7 @@ function createService(db, opts = {}) {
   return {
     login, assertSchoolActive, findUserByIdentifier, publicUser, changePassword, createUser, updateUser, listUsers,
     listChildren, createChild, updateChild,
+    requestChildChange, listChangeRequests, changeRequestsUnread, markChangeRequestsRead, resolveChangeRequest,
     listCategories, createCategory, listProducts, createProduct, updateProduct, deleteProduct,
     listCards, registerCard, assignCard, assignCardByUid, unassignCard, setCardStatus, reportLostAndReplace, lookupCard,
     getLimits, setLimits, getProhibitions, setProhibitions,

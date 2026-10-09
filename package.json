@@ -17,7 +17,8 @@
     "server": "node server/index.js",
     "e2e:web": "electron scripts/e2e-web.js",
     "e2e:mensualidad": "electron scripts/e2e-mensualidad.js",
-    "e2e:admin": "electron scripts/e2e-admin.js"
+    "e2e:admin": "electron scripts/e2e-admin.js",
+    "e2e:solicitudes": "electron scripts/e2e-solicitudes.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -128,7 +128,7 @@
     superadmin: [['Plataforma', [['instituciones', 'Escuelas', '🏫'], ['cuentas', 'Cuentas', '👥']]],
       ['Seguridad', [['seguridad', 'Seguridad y emergencia', '🛡️'], ['alertas', 'Alertas', '🔔'], ['bitacora', 'Bitácora', '📜']]],
       ['Mi cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
-    admin: [['Inicio', [['dashboard', 'Resumen', '📊']]],
+    admin: [['Inicio', [['dashboard', 'Resumen', '📊'], ['notificaciones', 'Notificaciones', '📬']]],
       ['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵']]],
       ['Escuela', [['alumnos', 'Alumnos y padres', '🧒'], ['tarjetas', 'Tarjetas', '🪪'], ['programar', 'Programar tarjetas', '📶'], ['productos', 'Productos', '🍎']]],
       ['Reportes', [['movimientos', 'Movimientos', '🧾']]],
@@ -162,7 +162,8 @@
         h('div', { class: 'brand' }, '🪪 Cooperativa NFC', h('small', null, subtitle)),
         h('nav', { class: 'nav' }, NAV[state.user.role].map(([title, its]) => h('div', { class: 'nav-group' }, h('div', { class: 'nav-title' }, title),
           its.map(([k, l, ico]) => h('a', { class: k === navActive ? 'active' : '', tabindex: '0', 'data-view': k, onclick: () => go(k), onkeydown: (e) => { if (e.key === 'Enter') go(k); } },
-            h('span', { class: 'ico' }, ico), h('span', null, l), k === 'alertas' && state.alertCount ? h('span', { class: 'count' }, String(state.alertCount)) : null))))),
+            h('span', { class: 'ico' }, ico), h('span', null, l), k === 'alertas' && state.alertCount ? h('span', { class: 'count' }, String(state.alertCount)) : null,
+            k === 'notificaciones' && state.notifCount ? h('span', { class: 'count', title: 'Sin leer' }, String(state.notifCount)) : null))))),
         !WEB && state.user.role !== 'tutor' ? h('div', { id: 'syncind', class: 'syncind', title: 'Clic para sincronizar ahora', onclick: () => window.coop.sync.now().then(updateSyncInd) }) : null,
         h('div', { class: 'who' }, h('b', null, state.user.full_name), h('span', null, ROLE_LABEL[state.user.role]),
           h('div', { style: { marginTop: '10px' } }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión')))),
@@ -183,6 +184,11 @@
       }).catch(() => {});
     }
     if (state.user.role === 'superadmin') refreshAlertCount();
+    if (state.user.role === 'admin') {
+      if (state.view !== 'notificaciones') refreshNotifCount();
+      // Revisa cada minuto si llegaron solicitudes nuevas de los padres
+      const t = setInterval(refreshNotifCount, 60000); onCleanup(() => clearInterval(t));
+    }
     Promise.resolve(VIEWS[state.view](main, state.params)).catch((e) => { main.appendChild(h('div', { class: 'result err' }, e.message)); });
   }
   // Número de alertas sin atender (insignia roja en el menú del superadministrador)
@@ -194,6 +200,18 @@
       const a = document.querySelector('.nav a[data-view="alertas"]'); if (!a) return;
       let c = a.querySelector('.count'); if (!n) { if (c) c.remove(); return; }
       if (!c) { c = h('span', { class: 'count' }); a.appendChild(c); } c.textContent = String(n);
+    }).catch(() => {});
+  }
+  // Solicitudes de los padres sin leer (insignia en "Notificaciones" del administrador de la escuela)
+  function setNavCount(view, n) {
+    const a = document.querySelector(`.nav a[data-view="${view}"]`); if (!a) return;
+    let c = a.querySelector('.count'); if (!n) { if (c) c.remove(); return; }
+    if (!c) { c = h('span', { class: 'count', title: 'Sin leer' }); a.appendChild(c); } c.textContent = String(n);
+  }
+  function refreshNotifCount() {
+    window.coop.call('changeRequestsUnread').then((r) => {
+      const n = r && r.ok ? r.data.unread : 0;
+      state.notifCount = n; setNavCount('notificaciones', n);
     }).catch(() => {});
   }
   let cleanups = [];
@@ -883,10 +901,84 @@
               : h('button', { class: 'btn ok', onclick: async () => { await safe(() => call('setCardStatus', { card_id: k.id, status: 'activa' })); go('hijo', { id: c.id, tab: 'tarjeta' }); } }, 'Desbloquear tarjeta'),
             h('p', { class: 'small muted' }, 'Si la tarjeta se perdió, bloquéela aquí y avise a la cooperativa para transferir el saldo a una tarjeta nueva.'))
             : h('p', { class: 'muted' }, 'Este alumno no tiene tarjeta vigente. Acuda a la cooperativa.'))),
-        h('div', null, h('h2', null, 'Personalizar'), h('div', { class: 'form' }, field('Nombre del alumno', name), field('Grado y grupo', grade),
-          h('div', { class: 'row' }, prev, field('Foto (opcional)', file), h('button', { class: 'btn sm', onclick: () => { photo = null; setPrev(); } }, 'Quitar')),
-          h('div', null, h('button', { class: 'btn primary', onclick: async () => { const r = await safe(() => call('updateChild', { id: c.id, full_name: name.value, grade: grade.value, photo })); if (r) { toast('Perfil actualizado', 'ok'); go('hijo', { id: c.id, tab: 'tarjeta' }); } } }, 'Guardar'))))));
+        isTutor ? tutorProfile(c, prev, file, () => photo, (v) => { photo = v; setPrev(); }, await call('listChangeRequests', { child_id: c.id }))
+          : h('div', null, h('h2', null, 'Personalizar'), h('div', { class: 'form' }, field('Nombre del alumno', name), field('Grado y grupo', grade),
+            h('div', { class: 'row' }, prev, field('Foto (opcional)', file), h('button', { class: 'btn sm', onclick: () => { photo = null; setPrev(); } }, 'Quitar')),
+            h('div', null, h('button', { class: 'btn primary', onclick: async () => { const r = await safe(() => call('updateChild', { id: c.id, full_name: name.value, grade: grade.value, photo })); if (r) { toast('Perfil actualizado', 'ok'); go('hijo', { id: c.id, tab: 'tarjeta' }); } } }, 'Guardar'))))));
     }
+  };
+
+  // ----- Tutor: perfil del alumno (nombre y grado solo lectura; foto editable; solicitudes de cambio) -----
+  const CR_STATUS = { pendiente: ['Pendiente', 'warn'], aprobada: ['Aprobada', 'ok'], rechazada: ['Rechazada', 'err'] };
+  const crBadge = (st) => { const [l, k] = CR_STATUS[st] || [st, '']; return h('span', { class: 'badge ' + k, 'data-cr-status': st }, l); };
+  const crDetail = (r) => h('div', null, h('b', null, r.field_label), r.field !== 'otro' ? [': ', h('span', { class: 'muted' }, r.old_value || '—'), ' → ', h('b', null, r.new_value || '—')] : (r.new_value ? [': ', r.new_value] : null),
+    r.comment ? h('div', { class: 'small muted' }, 'Motivo: ', r.comment) : null);
+  function tutorProfile(c, prev, file, getPhoto, setPhoto, requests) {
+    const reload = () => go('hijo', { id: c.id, tab: 'tarjeta' });
+    const ro = (label, value) => h('label', null, label, h('input', { value: value || '', readonly: true, disabled: true, 'data-readonly': '' }));
+    const ask = () => {
+      const fld = h('select', null, h('option', { value: 'nombre' }, 'Nombre'), h('option', { value: 'grado' }, 'Grado y grupo'), h('option', { value: 'otro' }, 'Otro'));
+      const val = h('input', { placeholder: 'Escriba el dato correcto' });
+      const com = h('textarea', { rows: 3, placeholder: 'Ej. Está mal escrito el apellido / Cambió de grupo' });
+      const cur = h('p', { class: 'small muted', style: { margin: 0 } });
+      const upd = () => { cur.textContent = fld.value === 'nombre' ? `Dato actual: ${c.full_name}` : (fld.value === 'grado' ? `Dato actual: ${c.grade || '—'}` : 'Describa el dato y el cambio que necesita.'); val.placeholder = fld.value === 'otro' ? 'Dato nuevo (opcional)' : 'Escriba el dato correcto'; };
+      fld.addEventListener('change', upd); upd();
+      modal('Solicitar cambio de datos', h('div', { class: 'form', 'data-cr-form': '' }, h('p', { class: 'small muted' }, `La escuela revisará su solicitud para ${c.full_name}. Verá aquí si fue aprobada o rechazada.`),
+        field('¿Qué dato?', fld), cur, field('Valor nuevo', val), field('Motivo o comentario', com)),
+      [{ label: 'Cancelar' }, { label: 'Enviar solicitud', class: 'primary', onClick: async () => {
+        const r = await safe(() => call('requestChildChange', { child_id: c.id, field: fld.value, new_value: val.value, comment: com.value }));
+        if (!r) return false; toast('Solicitud enviada a la escuela', 'ok'); reload();
+      } }]);
+    };
+    const savePhoto = async () => { const r = await safe(() => call('updateChild', { id: c.id, photo: getPhoto() })); if (r) { toast('Foto actualizada', 'ok'); reload(); } };
+    return h('div', null, h('h2', null, 'Perfil'),
+      h('div', { class: 'form' }, ro('Nombre del alumno', c.full_name), ro('Grado y grupo', c.grade),
+        h('p', { class: 'small muted', style: { margin: 0 } }, '🔒 El nombre y el grado/grupo solo los cambia la escuela.'),
+        h('div', null, h('button', { class: 'btn', 'data-cr-open': '', onclick: ask }, '✏️ Solicitar cambio de datos')),
+        h('div', { class: 'row' }, prev, field('Foto (opcional)', file), h('button', { class: 'btn sm', onclick: () => setPhoto(null) }, 'Quitar')),
+        h('div', null, h('button', { class: 'btn primary', onclick: savePhoto }, 'Guardar foto'))),
+      h('h2', { style: { marginTop: '18px' } }, 'Mis solicitudes'),
+      requests.length ? h('div', { class: 'cr-list' }, requests.map((r) => h('div', { class: 'card', style: { padding: '10px 12px', marginBottom: '8px' } },
+        h('div', { class: 'row', style: { justifyContent: 'space-between', gap: '8px' } }, crDetail(r), crBadge(r.status)),
+        h('div', { class: 'small muted' }, 'Enviada: ', fmtDate(r.created_at), r.resolved_at ? ` · Respuesta: ${fmtDate(r.resolved_at)}` : ''),
+        r.status === 'rechazada' && r.reject_reason ? h('div', { class: 'small' }, 'Motivo del rechazo: ', r.reject_reason) : null)))
+        : h('p', { class: 'muted' }, 'No ha enviado solicitudes.'));
+  }
+
+  // ----- Escuela: notificaciones (solicitudes de los padres) -----
+  VIEWS.notificaciones = async (main, params) => {
+    const filter = params.f || 'pendiente';
+    const rows = await call('listChangeRequests', filter === 'todas' ? {} : { status: filter });
+    await call('markChangeRequestsRead').catch(() => {});
+    state.notifCount = 0; setNavCount('notificaciones', 0);
+    const resolve = async (r, decision) => {
+      if (decision === 'aprobar') {
+        const what = r.field === 'otro' ? 'Se marcará como aprobada. Este tipo de cambio debe hacerlo usted a mano.' : `Se cambiará ${r.field === 'nombre' ? 'el nombre' : 'el grado y grupo'} de ${r.child_name}: "${r.old_value || '—'}" → "${r.new_value}".`;
+        if (!(await confirmBox('Aprobar solicitud', what))) return;
+        const x = await safe(() => call('resolveChangeRequest', { id: r.id, decision: 'aprobar' }));
+        if (x) { toast(x.applied ? 'Aprobada: el cambio ya se aplicó' : 'Solicitud aprobada', 'ok'); render(); }
+        return;
+      }
+      const why = h('textarea', { rows: 3, placeholder: 'Opcional: se le mostrará al tutor' });
+      modal('Rechazar solicitud', h('div', { class: 'form' }, h('div', null, crDetail(r)), field('Motivo (opcional)', why)),
+        [{ label: 'Cancelar' }, { label: 'Rechazar', class: 'danger', onClick: async () => {
+          const x = await safe(() => call('resolveChangeRequest', { id: r.id, decision: 'rechazar', reason: why.value }));
+          if (!x) return false; toast('Solicitud rechazada', 'ok'); render();
+        } }]);
+    };
+    const tabs = h('div', { class: 'tabs' }, [['pendiente', 'Pendientes'], ['aprobada', 'Aprobadas'], ['rechazada', 'Rechazadas'], ['todas', 'Todas']]
+      .map(([k, l]) => h('button', { class: 'btn' + (k === filter ? ' active' : ''), onclick: () => go('notificaciones', { f: k }) }, l)));
+    const table = rows.length ? h('div', { class: 'card tablewrap' }, h('table', { class: 'cr-table' },
+      h('thead', null, h('tr', null, ['Alumno', 'Tutor', 'Fecha', 'Detalle', 'Estado', ''].map((x) => h('th', null, x)))),
+      h('tbody', null, rows.map((r) => h('tr', { 'data-cr': r.id, class: r.unread ? 'unread' : '' },
+        h('td', null, h('a', { href: '#', onclick: (e) => { e.preventDefault(); go('hijo', { id: r.child_id, tab: 'tarjeta' }); } }, r.child_name || '—'), r.child_grade ? h('div', { class: 'small muted' }, r.child_grade) : null),
+        h('td', null, r.tutor_name || '—', r.tutor_phone ? h('div', { class: 'small muted' }, r.tutor_phone) : null),
+        h('td', null, fmtDate(r.created_at), r.unread ? h('div', null, badge('nueva', 'info')) : null),
+        h('td', null, crDetail(r), r.status === 'rechazada' && r.reject_reason ? h('div', { class: 'small' }, 'Motivo del rechazo: ', r.reject_reason) : null),
+        h('td', null, crBadge(r.status), r.resolved_at ? h('div', { class: 'small muted' }, fmtDate(r.resolved_at), r.resolved_by_name ? ' · ' + r.resolved_by_name : '') : null),
+        h('td', { style: { whiteSpace: 'nowrap' } }, r.status === 'pendiente' ? [h('button', { class: 'btn sm ok', onclick: () => resolve(r, 'aprobar') }, '✔ Aprobar'), ' ', h('button', { class: 'btn sm danger', onclick: () => resolve(r, 'rechazar') }, '✖ Rechazar')] : null))))))
+      : h('div', { class: 'card empty' }, filter === 'pendiente' ? 'No hay solicitudes pendientes.' : 'No hay solicitudes.');
+    put(main, pageHead('Notificaciones', 'Solicitudes de los padres para corregir datos de sus hijos. Al aprobar un cambio de nombre o de grado y grupo, se aplica automáticamente.'), tabs, table);
   };
 
   // ======================================================================
@@ -1545,7 +1637,7 @@
   // ----- Superadministrador: Bitácora -----
   // ======================================================================
   const ACTION_LABEL = { recarga: 'Recarga', recarga_caja: 'Recarga (caja)', ajuste: 'Ajuste de saldo', recarga_revertida: 'Recarga revertida', recarga_marcada: 'Recarga marcada',
-    producto_borrado: 'Producto borrado', producto_restaurado: 'Producto restaurado', contrasena_asignada: 'Contraseña asignada', contrasena_propia: 'Cambió su contraseña', superadmin_recuperado: 'Recuperación de superadmin',
+    producto_borrado: 'Producto borrado', solicitud_cambio_datos: 'Solicitud de cambio de datos', solicitud_cambio_aprobada: 'Solicitud de cambio aprobada', solicitud_cambio_rechazada: 'Solicitud de cambio rechazada', edicion_alumno_rechazada: 'Edición de alumno rechazada (tutor)', producto_restaurado: 'Producto restaurado', contrasena_asignada: 'Contraseña asignada', contrasena_propia: 'Cambió su contraseña', superadmin_recuperado: 'Recuperación de superadmin',
     rol_cambiado: 'Cambio de rol', cuenta_activada: 'Cuenta activada', cuenta_desactivada: 'Cuenta desactivada', usuario_creado: 'Cuenta creada', usuario_editado: 'Cuenta editada', cuenta_desbloqueada: 'Cuenta desbloqueada',
     login: 'Inicio de sesión', login_fallido: 'Contraseña incorrecta', cuenta_bloqueada_intentos: 'Bloqueo por intentos', login_rechazado_bloqueo: 'Acceso rechazado (bloqueo)',
     alerta_roja: 'ALERTA ROJA', alerta_roja_fin: 'Fin de alerta roja', congelar_recargas: 'Congelar recargas', congelar_ventas: 'Congelar ventas', solo_lectura: 'Solo lectura', cerrar_sesiones: 'Cerrar sesiones',

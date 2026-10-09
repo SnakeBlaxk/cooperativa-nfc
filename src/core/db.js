@@ -239,6 +239,26 @@ CREATE TABLE IF NOT EXISTS invitations (
   used_at TEXT,
   created_at TEXT NOT NULL
 );
+-- Solicitudes de cambio de datos del alumno (el tutor pide; el administrador de la escuela aprueba o rechaza)
+CREATE TABLE IF NOT EXISTS child_change_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  school_id INTEGER REFERENCES schools(id),
+  child_id INTEGER NOT NULL REFERENCES children(id),
+  tutor_id INTEGER REFERENCES users(id),
+  field TEXT NOT NULL CHECK (field IN ('nombre','grado','otro')),
+  old_value TEXT,
+  new_value TEXT,
+  comment TEXT,
+  status TEXT NOT NULL DEFAULT 'pendiente' CHECK (status IN ('pendiente','aprobada','rechazada')),
+  created_at TEXT NOT NULL,
+  resolved_at TEXT,
+  resolved_by INTEGER REFERENCES users(id),
+  resolved_by_name TEXT,
+  reject_reason TEXT,
+  admin_read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ccr_school ON child_change_requests(school_id, status, id);
+CREATE INDEX IF NOT EXISTS idx_ccr_child ON child_change_requests(child_id, id);
 `;
 
 const SYNC_TABLES = ['users', 'categories', 'products', 'children', 'cards', 'transactions'];
