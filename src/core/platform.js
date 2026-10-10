@@ -7,6 +7,7 @@ const crypto = require('crypto');
 
 const { STATUSES, isYmd } = require('./billing');
 const { createCardStock } = require('./card-stock');
+const { createRemovals } = require('./removals');
 function tempPassword() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   const b = crypto.randomBytes(10); let s = '';
@@ -31,8 +32,8 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
     const sd = sum('compra', day0()); const sm = sum('compra', month0()); const rm = sum('recarga', month0());
     const dev = q('SELECT COUNT(*) AS n, MAX(last_seen_at) AS last FROM devices WHERE school_id = ? AND revoked = 0');
     return {
-      students: q('SELECT COUNT(*) AS n FROM children WHERE school_id = ? AND active = 1').n,
-      tutors_linked: q('SELECT COUNT(DISTINCT tutor_id) AS n FROM children WHERE school_id = ? AND tutor_id IS NOT NULL').n,
+      students: q('SELECT COUNT(*) AS n FROM children WHERE school_id = ? AND active = 1 AND deleted_at IS NULL').n,
+      tutors_linked: q('SELECT COUNT(DISTINCT tutor_id) AS n FROM children WHERE school_id = ? AND tutor_id IS NOT NULL AND deleted_at IS NULL').n,
       active_cards: q("SELECT COUNT(*) AS n FROM cards WHERE school_id = ? AND status = 'activa'").n,
       total_cards: q('SELECT COUNT(*) AS n FROM cards WHERE school_id = ?').n,
       sales_day_cents: sd.s, sales_month_cents: sm.s, sales_month_count: sm.c,
@@ -161,7 +162,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
     const s = getSchool(schoolId);
     return db.all(`SELECT c.id, c.full_name, c.grade, c.active, c.tutor_id, u.full_name AS tutor_name,
         (SELECT uid FROM cards k WHERE k.child_id = c.id AND k.status IN ('activa','bloqueada') ORDER BY k.id DESC LIMIT 1) AS card_uid
-      FROM children c LEFT JOIN users u ON u.id = c.tutor_id WHERE c.school_id = ? ORDER BY c.grade, c.full_name`, [s.id]);
+      FROM children c LEFT JOIN users u ON u.id = c.tutor_id WHERE c.school_id = ? AND c.deleted_at IS NULL ORDER BY c.grade, c.full_name`, [s.id]);
   }
   // Códigos de invitación (para padres) de los alumnos indicados o de todos los que no tienen tutor
   function generateInvitations(actor, schoolId, { child_ids, only_unlinked = true } = {}) {
@@ -169,7 +170,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
     const s = getSchool(schoolId);
     const ids = Array.isArray(child_ids) && child_ids.length
       ? child_ids.map(Number)
-      : db.all(`SELECT id FROM children WHERE school_id = ? AND active = 1 ${only_unlinked ? 'AND tutor_id IS NULL' : ''} ORDER BY grade, full_name`, [s.id]).map((r) => r.id);
+      : db.all(`SELECT id FROM children WHERE school_id = ? AND active = 1 AND deleted_at IS NULL ${only_unlinked ? 'AND tutor_id IS NULL' : ''} ORDER BY grade, full_name`, [s.id]).map((r) => r.id);
     return db.transaction(() => ids.map((cid) => {
       const c = db.get('SELECT id FROM children WHERE id = ? AND school_id = ?', [cid, s.id]);
       if (!c) throw new AppError('Alumno no encontrado en esta escuela', 'NO_ENCONTRADO');
@@ -195,9 +196,11 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
   const SEC = security ? security.methods : {};
   const BILL = billing ? billing.methods : {};
   const STOCK = createCardStock(db, { security, now }).methods; // inventario de tarjetas (bitácora propia) // mensualidad (registran su propia bitácora)
+  const REM = createRemovals(db, { security, now }).methods; // bajas y Papelera de alumnos y tutores (bitácora propia)
   function handle(user, method, args, ctx = {}) {
     need(user);
     const a = args && typeof args === 'object' ? args : {};
+    if (Object.prototype.hasOwnProperty.call(REM, method)) return REM[method](user, a, ctx);
     if (Object.prototype.hasOwnProperty.call(SEC, method)) return SEC[method](user, a, ctx);
     if (Object.prototype.hasOwnProperty.call(BILL, method)) return BILL[method](user, a, ctx);
     if (Object.prototype.hasOwnProperty.call(STOCK, method)) return STOCK[method](user, a, ctx);
@@ -213,7 +216,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
     }
     return out;
   }
-  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: [...Object.keys(M), ...Object.keys(SEC), ...Object.keys(BILL), ...Object.keys(STOCK)] };
+  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: [...Object.keys(M), ...Object.keys(SEC), ...Object.keys(BILL), ...Object.keys(STOCK), ...Object.keys(REM)] };
 }
 
 module.exports = { createPlatform, tempPassword };

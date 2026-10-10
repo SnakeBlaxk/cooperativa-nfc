@@ -14,6 +14,7 @@ const { createSyncServer } = require('../src/core/sync-server');
 const { createSecurity } = require('../src/core/security');
 const { createBilling } = require('../src/core/billing');
 const { createPush } = require('../src/core/push');
+const { createRemovals } = require('../src/core/removals');
 
 // Métodos que, con una caja VIEJA sincronizada (solo si LEGACY_SYNC=1), se hacían solo en el escritorio.
 // En el modo normal (solo en línea) el servidor es la única fuente de verdad y estos métodos se usan desde
@@ -67,6 +68,8 @@ async function createServer(opts = {}) {
   // Notificaciones Web Push para padres (opts.pushSender permite simular el envío en pruebas)
   const push = createPush(db, { svc, sender: opts.pushSender, env: opts.env || process.env });
   const platform = createPlatform(db, { svc, sync, auth, security, billing });
+  // Bajas de alumnos y papás/tutores con Papelera (administrador de la escuela; el superadmin usa /api/super)
+  const removals = createRemovals(db, { security, now: opts.now });
   // Revisión periódica de mensualidades (alertas y pausas aunque nadie entre). También al arrancar.
   try { billing.sweep(); } catch (e) { console.error('[mensualidad]', e); }
   const sweepMs = opts.billingSweepMs === undefined ? 15 * 60 * 1000 : opts.billingSweepMs;
@@ -83,7 +86,7 @@ async function createServer(opts = {}) {
     next();
   });
 
-  const STATUS = { BLOQUEADO_SEGURIDAD: 423, SISTEMA_BLOQUEADO: 403, OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, ESCUELA_PAUSADA: 403, VERSION_OBSOLETA: 410, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, TARJETA_NO_AUTORIZADA: 403, LIMITE_INTENTOS: 429, INTERNO: 500 };
+  const STATUS = { BLOQUEADO_SEGURIDAD: 423, SISTEMA_BLOQUEADO: 403, OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, ESCUELA_PAUSADA: 403, VERSION_OBSOLETA: 410, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, TARJETA_NO_AUTORIZADA: 403, SALDO_PENDIENTE: 409, LIMITE_INTENTOS: 429, INTERNO: 500 };
   const send = (res, fn) => {
     Promise.resolve().then(fn).then((data) => res.json({ ok: true, data })).catch((e) => {
       const code = e.code || 'INTERNO';
@@ -206,6 +209,10 @@ async function createServer(opts = {}) {
     }
     const args = req.body || {};
     try { security.guard(req.user, method, args, ctx(req)); } catch (e) { return res.status(STATUS[e.code] || 423).json({ ok: false, error: e.message, code: e.code }); }
+    if (Object.prototype.hasOwnProperty.call(removals.methods, method)) {
+      if (['purgeChild', 'purgeTutor'].includes(method)) return res.status(403).json({ ok: false, error: 'Solo el superadministrador puede eliminar definitivamente', code: 'PROHIBIDO' });
+      return send(res, () => removals.methods[method](req.user, args, ctx(req)));
+    }
     const prevTutor = method === 'updateChild' && args.id ? (db.get('SELECT tutor_id FROM children WHERE id = ?', [Number(args.id)]) || {}).tutor_id : undefined;
     const prevProduct = method === 'updateProduct' && args.id ? db.get('SELECT name, price_cents, active FROM products WHERE id = ?', [Number(args.id)]) : null;
     const r = api.handle({ user: req.user }, method, args);

@@ -7,7 +7,7 @@ const bcrypt = require('bcryptjs');
 const { AppError, fmtLocal, str, normEmail, normPhone } = require('./service');
 
 // Métodos de la API que solo leen (todo lo demás se considera escritura)
-const READ_METHODS = new Set(['listUsers', 'listSchoolStock', 'listChildren', 'listCategories', 'listProducts', 'listCards', 'lookupCard', 'getLimits', 'getProhibitions', 'listMovements', 'childSummary', 'dashboard', 'listChangeRequests', 'changeRequestsUnread', 'markChangeRequestsRead', 'listStockMoves', 'getInventorySettings', 'listSchoolNotices', 'markNoticesRead', 'report', 'getPushPrefs', 'setPushPrefs', 'pushSubscribe', 'pushUnsubscribe', 'securityStatus', 'me', 'login', 'logout']);
+const READ_METHODS = new Set(['listUsers', 'listSchoolStock', 'listChildren', 'listCategories', 'listProducts', 'listCards', 'lookupCard', 'getLimits', 'getProhibitions', 'listMovements', 'childSummary', 'dashboard', 'listChangeRequests', 'changeRequestsUnread', 'markChangeRequestsRead', 'listStockMoves', 'getInventorySettings', 'listSchoolNotices', 'markNoticesRead', 'report', 'listRemoved', 'previewDeleteChild', 'getPushPrefs', 'setPushPrefs', 'pushSubscribe', 'pushUnsubscribe', 'securityStatus', 'me', 'login', 'logout']);
 const DEFAULTS = { large_recharge_cents: 100000, hours_start: '07:00', hours_end: '16:00' };
 const LOCKDOWN_PHRASE = 'ALERTA ROJA';
 
@@ -365,6 +365,7 @@ function createSecurity(db, opts = {}) {
     need(actor);
     const w = []; const p = [];
     if (f.role) { w.push('u.role = ?'); p.push(String(f.role)); }
+    w.push('u.deleted_at IS NULL'); // dados de baja: están en la Papelera
     if (f.school_id) { w.push('(u.school_id = ? OR EXISTS (SELECT 1 FROM children c WHERE c.tutor_id = u.id AND c.school_id = ?))'); p.push(Number(f.school_id), Number(f.school_id)); }
     if (f.status === 'activas') w.push('u.active = 1'); else if (f.status === 'bloqueadas') w.push('(u.active = 0 OR COALESCE(u.locked_until, 0) > ' + Date.now() + ')');
     if (f.q) { w.push('(u.username LIKE ? OR u.full_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)'); const q = '%' + String(f.q).slice(0, 60) + '%'; p.push(q, q, q, q); }
@@ -393,6 +394,7 @@ function createSecurity(db, opts = {}) {
     need(actor);
     const u = userOr404(userId);
     if (u.role === 'superadmin') throw new AppError('El superadministrador no se puede desactivar', 'PROHIBIDO');
+    if (u.deleted_at && active) throw new AppError('Esta cuenta está en la Papelera. Restáurela desde la Papelera.', 'VALIDACION');
     db.run('UPDATE users SET active = ?, token_version = token_version + 1 WHERE id = ?', [active ? 1 : 0, u.id]);
     if (!active) db.run('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [u.id]);
     audit(actor, active ? 'cuenta_activada' : 'cuenta_desactivada', { school_id: u.school_id, ip: ctx.ip, target_type: 'user', target_id: u.id, details: { cuenta: u.username, rol: u.role }, severity: active ? 'info' : 'aviso' });
@@ -413,8 +415,8 @@ function createSecurity(db, opts = {}) {
     need(actor);
     const u = userOr404(userId);
     const children = db.all(`SELECT c.id, c.full_name, c.grade, c.school_id, s.name AS school_name FROM children c LEFT JOIN schools s ON s.id = c.school_id
-      WHERE c.tutor_id = ? ORDER BY c.full_name`, [u.id]);
-    return { ...svc.publicUser(u), children, protected: u.role === 'superadmin' };
+      WHERE c.tutor_id = ? AND c.deleted_at IS NULL ORDER BY c.full_name`, [u.id]);
+    return { ...svc.publicUser(u), children, deleted_at: u.deleted_at || null, protected: u.role === 'superadmin' };
   }
   // Edición completa de una cuenta por el superadministrador: nombre, usuario, correo, teléfono,
   // jerarquía (admin/cajero/tutor), escuela y, para padres/tutores, sus alumnos vinculados.
@@ -479,6 +481,7 @@ function createSecurity(db, opts = {}) {
     need(actor);
     const w = []; const p = [];
     if (f.school_id) { w.push('c.school_id = ?'); p.push(Number(f.school_id)); }
+    w.push('c.deleted_at IS NULL');
     if (f.q) { w.push('c.full_name LIKE ?'); p.push('%' + String(f.q).slice(0, 60) + '%'); }
     return db.all(`SELECT c.id, c.full_name, c.grade, c.school_id, s.name AS school_name, c.tutor_id, t.full_name AS tutor_name FROM children c
       LEFT JOIN schools s ON s.id = c.school_id LEFT JOIN users t ON t.id = c.tutor_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY s.name, c.grade, c.full_name LIMIT 300`, p);

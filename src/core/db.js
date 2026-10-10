@@ -405,6 +405,15 @@ class Database {
     add('transactions', 'reversed_by', 'TEXT');
     add('schools', 'stock_block_zero', 'INTEGER NOT NULL DEFAULT 1');
     add('transactions', 'flag_note', 'TEXT');
+    // v2.3: bajas con Papelera (borrado lógico de alumnos y papás/tutores) y reembolso al dar de baja
+    add('children', 'deleted_at', 'TEXT');
+    add('children', 'deleted_by', 'TEXT');
+    add('users', 'deleted_at', 'TEXT');
+    add('users', 'deleted_by', 'TEXT');
+    add('users', 'deleted_school_id', 'INTEGER');
+    add('users', 'deleted_info', 'TEXT');
+    add('transactions', 'subtype', 'TEXT');
+    add('transactions', 'child_name', 'TEXT');
     for (const t of ['users', 'children', 'cards', 'categories', 'products', 'transactions', 'devices', 'sync_changes']) add(t, 'school_id', 'INTEGER');
     // Identificador global (UUID de 128 bits) para sincronizar sin depender de los id locales
     for (const t of SYNC_TABLES) {

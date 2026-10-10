@@ -93,7 +93,7 @@ function createService(db, opts = {}) {
     if (!roles.includes(actor.role)) throw new AppError('No tienes permiso para esta acción', 'PROHIBIDO');
   }
   function getChildOrFail(childId, actor) {
-    const c = db.get(`SELECT * FROM children WHERE id = ?${scope(actor)}`, [int(childId, 'niño', { min: 1 })]);
+    const c = db.get(`SELECT * FROM children WHERE id = ? AND deleted_at IS NULL${scope(actor)}`, [int(childId, 'niño', { min: 1 })]);
     if (!c) throw new AppError('Alumno no encontrado', 'NO_ENCONTRADO');
     return c;
   }
@@ -198,7 +198,7 @@ function createService(db, opts = {}) {
   // Usuarios visibles para el personal de una escuela: su personal y sus tutores
   function visibleUsersWhere(actor) {
     const id = sch(actor);
-    return id === null ? "u.role <> 'superadmin'" : `((u.role IN ('admin','cajero') AND u.school_id = ${id}) OR (u.role = 'tutor' AND ${TUTOR_IN_SCHOOL(id)}))`;
+    return id === null ? "u.role <> 'superadmin' AND u.deleted_at IS NULL" : `u.deleted_at IS NULL AND ((u.role IN ('admin','cajero') AND u.school_id = ${id}) OR (u.role = 'tutor' AND ${TUTOR_IN_SCHOOL(id)}))`;
   }
   function getVisibleUser(actor, id) {
     const u = db.get(`SELECT u.* FROM users u WHERE u.id = ? AND ${visibleUsersWhere(actor)}`, [int(id, 'id', { min: 1 })]);
@@ -215,7 +215,7 @@ function createService(db, opts = {}) {
     const vis = visibleUsersWhere(actor);
     const rows = role ? db.all(`SELECT u.* FROM users u WHERE u.role = ? AND ${vis} ORDER BY u.full_name`, [role]) : db.all(`SELECT u.* FROM users u WHERE ${vis} ORDER BY u.role, u.full_name`);
     return rows.map(publicUser).map((u) => {
-      if (u.role === 'tutor') u.children = db.all(`SELECT id, full_name FROM children WHERE tutor_id = ?${scope(actor)} ORDER BY full_name`, [u.id]);
+      if (u.role === 'tutor') u.children = db.all(`SELECT id, full_name FROM children WHERE tutor_id = ? AND deleted_at IS NULL${scope(actor)} ORDER BY full_name`, [u.id]);
       return u;
     });
   }
@@ -230,8 +230,8 @@ function createService(db, opts = {}) {
   function listChildren(actor) {
     requireRole(actor, ...ROLES);
     const rows = actor.role === 'tutor'
-      ? db.all('SELECT * FROM children WHERE tutor_id = ? ORDER BY full_name', [actor.id])
-      : db.all(`SELECT * FROM children WHERE 1=1${scope(actor)} ORDER BY full_name`);
+      ? db.all('SELECT * FROM children WHERE tutor_id = ? AND deleted_at IS NULL ORDER BY full_name', [actor.id])
+      : db.all(`SELECT * FROM children WHERE deleted_at IS NULL${scope(actor)} ORDER BY full_name`);
     return rows.map(childRow);
   }
   function validPhoto(p) {
@@ -916,7 +916,7 @@ function createService(db, opts = {}) {
     if (f.to) { if (!/^\d{4}-\d{2}-\d{2}$/.test(f.to)) throw new AppError('Fecha final inválida', 'VALIDACION'); where.push('t.created_at <= ?'); params.push(f.to + ' 23:59:59'); }
     if (f.uid) { where.push('t.card_uid = ?'); params.push(normUid(f.uid)); }
     const limit = int(f.limit || 300, 'límite', { min: 1, max: 5000 });
-    const rows = db.all(`SELECT t.*, ch.full_name AS child_name, COALESCE(u.full_name, t.processed_by_name) AS user_name
+    const rows = db.all(`SELECT t.*, COALESCE(ch.full_name, t.child_name) AS child_name, COALESCE(u.full_name, t.processed_by_name) AS user_name
       FROM transactions t LEFT JOIN children ch ON ch.id = t.child_id LEFT JOIN users u ON u.id = t.user_id
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY t.created_at DESC, t.id DESC LIMIT ${limit}`, params);
     for (const r of rows) {
@@ -992,6 +992,7 @@ function createService(db, opts = {}) {
     const sales = db.get(`SELECT COALESCE(SUM(amount_cents),0) AS s, COUNT(*) AS n FROM transactions t WHERE ${SALE}${W}`, [a, b]);
     const rech = db.get(`SELECT COALESCE(SUM(amount_cents),0) AS s, COUNT(*) AS n FROM transactions t WHERE t.type='recarga' AND t.status='aprobado'${W}`, [a, b]);
     const rej = db.get(`SELECT COALESCE(SUM(amount_cents),0) AS s, COUNT(*) AS n FROM transactions t WHERE t.type='compra' AND t.status='rechazado'${W}`, [a, b]);
+    const refunds = db.get(`SELECT COALESCE(SUM(-amount_cents),0) AS s, COUNT(*) AS n FROM transactions t WHERE t.type='ajuste' AND t.subtype='reembolso' AND t.status='aprobado'${W}`, [a, b]);
     const canc = db.get(`SELECT COALESCE(SUM(amount_cents),0) AS s, COUNT(*) AS n FROM transactions t WHERE t.type='compra' AND t.reversed_at IS NOT NULL${W}`, [a, b]);
     const byDayRows = db.all(`SELECT substr(t.created_at,1,10) AS date, SUM(amount_cents) AS total_cents, COUNT(*) AS n FROM transactions t WHERE ${SALE}${W} GROUP BY 1`, [a, b]);
     const map = new Map(byDayRows.map((r) => [r.date, r]));
@@ -1002,12 +1003,12 @@ function createService(db, opts = {}) {
       WHERE ${SALE}${W} GROUP BY ti.product_name ORDER BY qty DESC, total_cents DESC LIMIT 10`, [a, b]);
     const byCashier = db.all(`SELECT COALESCE(u.full_name, t.processed_by_name, 'Sin nombre') AS name, COUNT(*) AS count, SUM(t.amount_cents) AS total_cents FROM transactions t LEFT JOIN users u ON u.id = t.user_id
       WHERE ${SALE}${W} GROUP BY 1 ORDER BY total_cents DESC`, [a, b]);
-    const rejected = db.all(`SELECT t.id, t.created_at, t.reason, t.amount_cents, ch.full_name AS child_name FROM transactions t LEFT JOIN children ch ON ch.id = t.child_id
+    const rejected = db.all(`SELECT t.id, t.created_at, t.reason, t.amount_cents, COALESCE(ch.full_name, t.child_name) AS child_name FROM transactions t LEFT JOIN children ch ON ch.id = t.child_id
       WHERE t.type='compra' AND t.status='rechazado'${W} ORDER BY t.id DESC LIMIT 50`, [a, b]);
     return {
       school_name: schoolName(sid), from, to, only_cashier: userId ? (actor.full_name || actor.username) : null, generated_at: ts(),
       sales_cents: sales.s, sales_count: sales.n, avg_ticket_cents: sales.n ? Math.round(sales.s / sales.n) : 0,
-      recharges_cents: rech.s, recharges_count: rech.n, rejected_count: rej.n, rejected_cents: rej.s, cancelled_count: canc.n, cancelled_cents: canc.s,
+      recharges_cents: rech.s, recharges_count: rech.n, rejected_count: rej.n, rejected_cents: rej.s, cancelled_count: canc.n, cancelled_cents: canc.s, refunds_count: refunds.n, refunds_cents: refunds.s,
       sales_by_day: days, top_products: top, by_cashier: byCashier, rejected,
     };
   }

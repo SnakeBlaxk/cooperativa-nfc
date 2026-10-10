@@ -245,7 +245,7 @@ function createAuth(db, svc, opts = {}) {
   // Admin: solo alumnos de su escuela. Superadmin: cualquiera.
   function createInvitation(actor, childId, opt = {}) {
     if (!actor || !['admin', 'superadmin'].includes(actor.role)) throw new AppError('No tienes permiso para esta acción', 'PROHIBIDO');
-    const c = db.get('SELECT * FROM children WHERE id = ?', [Number(childId)]);
+    const c = db.get('SELECT * FROM children WHERE id = ? AND deleted_at IS NULL', [Number(childId)]);
     if (!c || (actor.role === 'admin' && c.school_id !== actor.school_id)) throw new AppError('Alumno no encontrado', 'NO_ENCONTRADO');
     return inviteFor(c, actor.id || null, opt);
   }
@@ -271,6 +271,7 @@ function createAuth(db, svc, opts = {}) {
     const c = String(code || '').trim().toUpperCase().replace(/\s/g, '');
     const inv = db.get('SELECT * FROM invitations WHERE code = ?', [c]);
     if (!inv || inv.used_by || inv.expires_at < nowMs()) throw new AppError('Código de invitación inválido, usado o vencido', 'VALIDACION');
+    if (!db.get('SELECT 1 AS x FROM children WHERE id = ? AND deleted_at IS NULL', [inv.child_id])) throw new AppError('Código de invitación inválido, usado o vencido', 'VALIDACION');
     return inv;
   }
   function linkChild(inv, userId) {

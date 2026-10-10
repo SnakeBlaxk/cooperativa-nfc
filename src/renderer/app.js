@@ -125,14 +125,14 @@
   // ---------- navegación ----------
   // Menú agrupado por tema: [título del grupo, [[vista, etiqueta, ícono], ...]]
   const NAV = {
-    superadmin: [['Plataforma', [['instituciones', 'Escuelas', '🏫'], ['inventario', 'Mis tarjetas (inventario)', '🪪'], ['cuentas', 'Cuentas', '👥']]],
+    superadmin: [['Plataforma', [['instituciones', 'Escuelas', '🏫'], ['inventario', 'Mis tarjetas (inventario)', '🪪'], ['cuentas', 'Cuentas', '👥'], ['papelera', 'Papelera', '🗑️']]],
       ['Seguridad', [['seguridad', 'Seguridad y emergencia', '🛡️'], ['alertas', 'Alertas', '🔔'], ['bitacora', 'Bitácora', '📜']]],
       ['Mi cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
     admin: [['Inicio', [['dashboard', 'Resumen', '📊'], ['notificaciones', 'Notificaciones', '📬']]],
       ['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵']]],
       ['Escuela', [['alumnos', 'Alumnos y padres', '🧒'], ['tarjetas', 'Tarjetas', '🪪'], ['programar', 'Programar tarjetas', '📶'], ['productos', 'Productos', '🍎']]],
       ['Reportes', [['reportes', 'Reportes', '📈'], ['movimientos', 'Movimientos', '🧾']]],
-      ['Configuración', [['usuarios', 'Personal', '👥'], ['ajustes', 'Ajustes', '⚙️']]]],
+      ['Configuración', [['usuarios', 'Personal', '👥'], ['papelera', 'Papelera', '🗑️'], ['ajustes', 'Ajustes', '⚙️']]]],
     cajero: [['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵'], ['movimientos', 'Movimientos', '🧾'], ['corte', 'Corte del día', '🧮']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
     tutor: [['Mi familia', [['hijos', 'Mis hijos', '🧒'], ['movimientos', 'Historial', '🧾']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
   };
@@ -678,6 +678,89 @@
     setTimeout(() => uidIn.focus(), 50);
   };
 
+  // ----- Bajas de alumnos y papás/tutores (administrador de la escuela y superadministrador) -----
+  // caller: call (administrador) o superCall (superadministrador). Todo queda en la Papelera.
+  async function deleteChildFlow(c, caller, onDone) {
+    let pv;
+    try { pv = await caller('previewDeleteChild', { child_id: c.id }); } catch (e) { return toast(e.message, 'err'); }
+    const bal = pv.balance_cents;
+    const refund = h('input', { type: 'checkbox' });
+    const alsoTutor = h('input', { type: 'checkbox' });
+    const body = h('div', { class: 'form' },
+      h('p', null, '¿Dar de baja a ', h('b', null, pv.child.full_name), pv.child.grade ? ` (${pv.child.grade})` : '', '?'),
+      h('ul', { class: 'small' },
+        h('li', null, 'El alumno pasa a la ', h('b', null, 'Papelera'), ' y se puede restaurar.'),
+        pv.card ? h('li', null, 'Su tarjeta ', h('code', null, pv.card.uid), ' se le quita y vuelve a las tarjetas libres de la escuela.') : h('li', null, 'No tiene tarjeta asignada.'),
+        h('li', null, 'Su historial de compras y recargas se conserva para los reportes.')),
+      bal > 0 ? h('div', { style: { padding: '10px 12px', borderRadius: '10px', background: '#fff7e6', border: '1px solid #f5c26b' } },
+        h('b', null, `⚠️ Tiene saldo de ${money(bal)}.`), h('div', { class: 'small' }, 'Para darlo de baja entregue ese dinero en efectivo al papá/tutor y márquelo aquí. Si no, cancele.'),
+        h('label', { class: 'check', style: { marginTop: '8px' } }, refund, `Ya entregué el reembolso de ${money(bal)} en efectivo`)) : null,
+      pv.tutor ? (pv.tutor.other_children === 0
+        ? h('label', { class: 'check' }, alsoTutor, `También eliminar al papá/tutor ${pv.tutor.full_name} (no tiene otros hijos)`)
+        : h('p', { class: 'small muted' }, `Su papá/tutor ${pv.tutor.full_name} tiene otros hijos y se conserva.`)) : null);
+    modal('Eliminar alumno', body, [{ label: 'Cancelar' }, { label: 'Eliminar alumno', class: 'danger', onClick: async () => {
+      if (bal > 0 && !refund.checked) { toast('Marque que entregó el reembolso en efectivo, o cancele.', 'err'); return false; }
+      try {
+        const r = await caller('deleteChild', { child_id: c.id, refund: bal > 0 ? 'efectivo' : undefined, delete_tutor: alsoTutor.checked || undefined });
+        toast(r.refunded_cents ? `Alumno dado de baja. Reembolso registrado: ${money(r.refunded_cents)}` : 'Alumno enviado a la Papelera', 'ok');
+        if (onDone) onDone();
+      } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+  }
+  async function deleteTutorFlow(t, caller, onDone) {
+    const kids = (t.children || []).map((c) => c.full_name);
+    modal('Eliminar papá/tutor', h('div', { class: 'form' },
+      h('p', null, '¿Dar de baja a ', h('b', null, t.full_name), t.username ? ` (${t.username})` : '', '?'),
+      h('ul', { class: 'small' },
+        h('li', null, 'Ya no podrá entrar y se cierran sus sesiones abiertas.'),
+        h('li', null, kids.length ? `Sus hijos (${kids.join(', ')}) siguen inscritos, pero quedan sin papá/tutor.` : 'No tiene hijos vinculados.'),
+        h('li', null, 'Pasa a la Papelera y se puede restaurar.'))),
+    [{ label: 'Cancelar' }, { label: 'Eliminar papá/tutor', class: 'danger', onClick: async () => {
+      try { await caller('deleteTutor', { user_id: t.id }); toast('Papá/tutor enviado a la Papelera', 'ok'); if (onDone) onDone(); } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+  }
+  // Papelera de alumnos y papás/tutores (escuela) — el superadministrador además puede eliminar definitivamente
+  async function papeleraView(main, caller, { isSuper = false, schools = [], schoolId = '' } = {}) {
+    const school = isSuper ? h('select', null, h('option', { value: '' }, 'Todas las escuelas'), schools.map((s) => h('option', { value: s.id, selected: String(s.id) === String(schoolId) }, s.name))) : null;
+    const box = h('div');
+    const ago = (d) => (d === 0 ? 'hoy' : d === 1 ? 'hace 1 día' : `hace ${d} días`);
+    const load = async () => {
+      const r = await safe(() => caller('listRemoved', { school_id: school && school.value ? Number(school.value) : undefined })); if (!r) return;
+      box.innerHTML = '';
+      const purge = (kind, x) => async () => {
+        if (!(await confirmBox('Eliminar definitivamente', `${x.full_name} se borrará para siempre y ya no se podrá restaurar. Los movimientos se conservan en los reportes. ¿Continuar?`))) return;
+        if (await safe(() => caller(kind === 'alumno' ? 'purgeChild' : 'purgeTutor', kind === 'alumno' ? { child_id: x.id } : { user_id: x.id }))) { toast('Eliminado definitivamente', 'ok'); load(); }
+      };
+      const restore = (kind, x) => async () => {
+        const res = await safe(() => caller(kind === 'alumno' ? 'restoreChild' : 'restoreTutor', kind === 'alumno' ? { child_id: x.id } : { user_id: x.id }));
+        if (res) { toast(res.message || 'Restaurado', 'ok'); load(); }
+      };
+      const acts = (kind, x) => h('div', { class: 'row', style: { justifyContent: 'flex-end', gap: '6px' } },
+        h('button', { class: 'btn sm ok', onclick: restore(kind, x) }, '↩️ Restaurar'),
+        r.can_purge ? h('button', { class: 'btn sm danger', onclick: purge(kind, x) }, 'Eliminar definitivamente') : null);
+      box.appendChild(h('div', { class: 'card tablewrap' }, h('h2', null, `Alumnos dados de baja (${r.children.length})`),
+        r.children.length ? respTable([{ label: 'Alumno' }, isSuper ? { label: 'Escuela' } : null, { label: 'Dado de baja' }, { label: 'Por' }, { label: 'Movimientos', right: true }, { label: '', right: true }].filter(Boolean),
+          r.children.map((c) => [h('div', null, h('b', null, c.full_name), h('div', { class: 'small muted' }, [c.grade, c.tutor_name ? 'Tutor: ' + c.tutor_name : null].filter(Boolean).join(' · '))),
+            isSuper ? c.school_name || '—' : null, h('span', { title: fmtDate(c.deleted_at) }, ago(c.days)), c.deleted_by || '—', String(c.movements), acts('alumno', c)].filter((x) => x !== null)), null, 'resp-md')
+          : h('div', { class: 'empty' }, 'No hay alumnos en la Papelera')));
+      box.appendChild(h('div', { class: 'card tablewrap', style: { marginTop: '16px' } }, h('h2', null, `Papás/tutores dados de baja (${r.tutors.length})`),
+        r.tutors.length ? respTable([{ label: 'Papá/tutor' }, isSuper ? { label: 'Escuela' } : null, { label: 'Dado de baja' }, { label: 'Por' }, { label: '', right: true }].filter(Boolean),
+          r.tutors.map((u) => [h('div', null, h('b', null, u.full_name), h('div', { class: 'small muted' }, [u.username, u.email, u.phone].filter(Boolean).join(' · '))),
+            isSuper ? u.school_name || '—' : null, h('span', { title: fmtDate(u.deleted_at) }, ago(u.days)), u.deleted_by || '—', acts('tutor', u)].filter((x) => x !== null)), null, 'resp-md')
+          : h('div', { class: 'empty' }, 'No hay papás/tutores en la Papelera')));
+    };
+    if (school) school.addEventListener('change', load);
+    put(main, pageHead('Papelera', isSuper
+      ? 'Alumnos y papás/tutores dados de baja en las escuelas. Puede restaurarlos o eliminarlos definitivamente.'
+      : 'Alumnos y papás/tutores dados de baja. Puede restaurarlos cuando quiera (se guardan al menos 30 días; solo Zuki Company los elimina definitivamente).'),
+    school ? h('div', { class: 'card filters' }, field('Escuela', school)) : null, box);
+    await load();
+  }
+  VIEWS.papelera = async (main, params = {}) => {
+    if (state.user.role === 'superadmin') { const o = await superCall('overview'); return papeleraView(main, superCall, { isSuper: true, schools: o.schools, schoolId: params.school_id || '' }); }
+    return papeleraView(main, call);
+  };
+
   // ----- Tutores y alumnos (admin) -----
   VIEWS.alumnos = async (main) => {
     const [tutors, children] = await Promise.all([call('listUsers', { role: 'tutor' }), call('listChildren')]);
@@ -705,14 +788,14 @@
         h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Padres / tutores'), h('button', { class: 'btn primary sm', onclick: () => (WEB ? tutorTempModal() : editTutor(null)) }, '+ Tutor')),
           h('table', null, h('tr', null, h('th', null, 'Nombre'), h('th', null, 'Usuario'), h('th', null, 'Hijos'), h('th', null, '')),
             tutors.map((t) => h('tr', null, h('td', null, t.full_name, h('div', { class: 'small muted' }, [t.phone, t.email].filter(Boolean).join(' · '))), h('td', null, t.username, t.active ? '' : ' (inactivo)'),
-              h('td', null, (t.children || []).map((c) => c.full_name).join(', ') || '—'), h('td', null, h('button', { class: 'btn sm', onclick: () => editTutor(t) }, 'Editar')))))),
+              h('td', null, (t.children || []).map((c) => c.full_name).join(', ') || '—'), h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => editTutor(t) }, 'Editar'), ' ', h('button', { class: 'btn sm danger', title: 'Eliminar papá/tutor', onclick: () => deleteTutorFlow(t, call, render) }, 'Eliminar papá/tutor')))))),
         h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Alumnos'), h('button', { class: 'btn primary sm', onclick: () => editChild(null) }, '+ Alumno')),
           h('table', null, h('tr', null, h('th', null, 'Alumno'), h('th', null, 'Tarjeta'), h('th', { class: 'right' }, 'Saldo'), h('th', null, '')),
             children.map((c) => h('tr', null, h('td', null, h('div', { class: 'row' }, avatar(c.photo, 34), h('div', null, c.full_name, c.active ? '' : ' (inactivo)', h('div', { class: 'small muted' }, `${c.grade || ''} · ${c.tutor ? c.tutor.full_name : ''}`)))),
               h('td', null, c.card ? [h('code', null, c.card.uid), ' ', badge(c.card.status)] : h('button', { class: 'btn sm ok', onclick: () => go('hijo', { id: c.id, tab: 'tarjeta' }) }, '🪪 Asignar tarjeta')),
               h('td', { class: 'right' }, money(c.balance_cents)),
               h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => editChild(c) }, 'Editar'), ' ', h('button', { class: 'btn sm primary', onclick: () => go('hijo', { id: c.id }) }, 'Ver'), ' ', h('button', { class: 'btn sm', onclick: () => go('hijo', { id: c.id, tab: 'tarjeta' }) }, 'Tarjeta'),
-                WEB ? [' ', h('button', { class: 'btn sm', onclick: () => invite(c) }, 'Invitación')] : null)))))));
+                WEB ? [' ', h('button', { class: 'btn sm', onclick: () => invite(c) }, 'Invitación')] : null, ' ', h('button', { class: 'btn sm danger', onclick: () => deleteChildFlow(c, call, render) }, 'Eliminar alumno'))))))));
   };
   // Código de invitación para que el padre cree su cuenta y quede vinculado (solo servidor)
   async function invite(c) {
@@ -804,7 +887,7 @@
   function movTable(rows, { showUser = true, showChild = true, onReverse = null } = {}) {
     if (!rows.length) return h('div', { class: 'empty' }, 'Sin movimientos');
     return h('table', null, h('tr', null, h('th', null, 'Fecha'), showChild ? h('th', null, 'Alumno') : null, h('th', null, 'Tipo'), h('th', null, 'Detalle'), h('th', null, 'Estado'), h('th', { class: 'right' }, 'Monto'), h('th', { class: 'right' }, 'Saldo'), showUser ? h('th', null, 'Atendió') : null, onReverse ? h('th', null, '') : null),
-      rows.map((m) => h('tr', null, h('td', null, fmtDate(m.created_at)), showChild ? h('td', null, m.child_name || '—') : null, h('td', null, badge(m.type, m.type === 'recarga' ? 'recarga' : '')),
+      rows.map((m) => h('tr', null, h('td', null, fmtDate(m.created_at)), showChild ? h('td', null, m.child_name || '—') : null, h('td', null, badge(m.subtype || m.type, m.type === 'recarga' ? 'recarga' : (m.subtype === 'reembolso' ? 'warn' : ''))),
         h('td', null, m.items.length ? h('div', { class: 'items-list' }, m.items.map((i) => `${i.qty}× ${i.product_name}`).join(', ')) : h('span', { class: 'items-list' }, m.note || ''),
           m.reason ? h('div', { class: 'small', style: { color: 'var(--err)' } }, m.reason) : null),
         h('td', null, badge(m.status)),
@@ -957,7 +1040,7 @@
       h('div', { class: 'card row report-head', style: { marginBottom: '16px', justifyContent: 'space-between', flexWrap: 'wrap' } },
         h('div', null, h('h2', { style: { margin: 0 } }, r.school_name || 'Su escuela'), h('div', { class: 'muted' }, `${reportTitle(r, corte)} · ${rangeText(r)}`, r.only_cashier ? ` · ${r.only_cashier}` : '')), actions),
       h('div', { class: 'grid g4' }, statCard('Ventas', money(r.sales_cents), `${r.sales_count} ventas`), statCard('Ticket promedio', money(r.avg_ticket_cents)),
-        statCard('Recargas', money(r.recharges_cents), `${r.recharges_count} recargas`), statCard('Ventas rechazadas', String(r.rejected_count), r.cancelled_count ? `${r.cancelled_count} canceladas (${money(r.cancelled_cents)})` : 'Por límites, saldo, prohibiciones o existencias')),
+        statCard('Recargas', money(r.recharges_cents), r.refunds_count ? `${r.recharges_count} recargas · reembolsos por baja: ${money(r.refunds_cents)}` : `${r.recharges_count} recargas`), statCard('Ventas rechazadas', String(r.rejected_count), r.cancelled_count ? `${r.cancelled_count} canceladas (${money(r.cancelled_cents)})` : 'Por límites, saldo, prohibiciones o existencias')),
       h('div', { class: 'card chart', style: { marginTop: '20px' } }, h('h2', null, 'Ventas por día'), barChart(r.sales_by_day)),
       h('div', { class: 'grid g2', style: { marginTop: '20px' } },
         h('div', { class: 'card' }, h('h2', null, 'Productos más vendidos'), tbl([['Producto'], ['Piezas', 1], ['Total', 1]], r.top_products.map((p) => [p.name, p.qty, money(p.total_cents)]))),
@@ -1475,7 +1558,7 @@
     put(main,
       h('div', { style: { marginBottom: '10px' } }, h('button', { class: 'btn ghost', onclick: () => go('instituciones') }, '← Volver a escuelas')),
       pageHead(s.name, [s.contact_name, s.contact_phone, s.contact_email].filter(Boolean).join(' · ') || 'Datos de la escuela', schoolBadge(s.status)),
-      h('div', { class: 'row', style: { marginBottom: '18px', flexWrap: 'wrap' } }, h('button', { class: 'btn', onclick: edit }, '✏️ Editar datos y plan'), h('button', { class: 'btn', onclick: () => go('seguridad') }, '🛡️ Seguridad de esta escuela')),
+      h('div', { class: 'row', style: { marginBottom: '18px', flexWrap: 'wrap' } }, h('button', { class: 'btn', onclick: edit }, '✏️ Editar datos y plan'), h('button', { class: 'btn', onclick: () => go('seguridad') }, '🛡️ Seguridad de esta escuela'), h('button', { class: 'btn', onclick: () => schoolKidsModal(s) }, '🧒 Alumnos y papás'), h('button', { class: 'btn', onclick: () => go('papelera', { school_id: s.id }) }, '🗑️ Papelera')),
       billCard,
       h('div', { class: 'grid g4 stats' },
         stat('Alumnos', String(st.students), `${st.tutors_linked} padres vinculados`), stat('Tarjetas activas', String(st.active_cards), `de ${st.total_cards}`),
@@ -1494,6 +1577,28 @@
       h('p', { class: 'small muted' }, 'Cada código vincula a un padre/tutor con su hijo(a). Se reutiliza el código vigente si ya existe.'),
       invRows.length ? respTable([{ label: 'Alumno' }, { label: 'Código' }, { label: 'Estado' }, { label: 'Usado por' }, { label: 'Vence' }], invRows) : h('div', { class: 'empty' }, 'Sin códigos generados')));
   };
+
+  // Alumnos de una escuela (superadministrador): dar de baja alumnos y papás/tutores
+  async function schoolKidsModal(s) {
+    const q = h('input', { placeholder: 'Buscar alumno o papá/tutor' });
+    const box = h('div', { class: 'tablewrap', style: { maxHeight: '60vh', overflow: 'auto' } });
+    let kids = [];
+    const reload = async () => { kids = await safe(() => superCall('listChildren', { school_id: s.id })) || []; draw(); };
+    const draw = () => {
+      const t = q.value.trim().toLowerCase();
+      const list = kids.filter((k) => !t || (k.full_name + ' ' + (k.tutor_name || '')).toLowerCase().includes(t));
+      box.innerHTML = '';
+      box.appendChild(list.length ? h('table', null, h('tr', null, h('th', null, 'Alumno'), h('th', null, 'Papá/tutor'), h('th', null, 'Tarjeta'), h('th', null, '')),
+        list.map((k) => h('tr', null, h('td', null, h('b', null, k.full_name), h('div', { class: 'small muted' }, k.grade || '')),
+          h('td', null, k.tutor_name || '—', k.tutor_id ? h('div', null, h('button', { class: 'btn sm danger', onclick: async () => { const acc = await safe(() => superCall('getAccount', { user_id: k.tutor_id })); if (acc) deleteTutorFlow(acc, superCall, reload); } }, 'Eliminar papá/tutor')) : null),
+          h('td', null, k.card_uid ? h('code', null, k.card_uid) : '—'),
+          h('td', { class: 'right' }, h('button', { class: 'btn sm danger', onclick: () => deleteChildFlow(k, superCall, reload) }, 'Eliminar alumno'))))) : h('div', { class: 'empty' }, 'Sin alumnos'));
+    };
+    q.addEventListener('input', draw);
+    modal('Alumnos y papás — ' + s.name, h('div', { class: 'form' }, q, box), [{ label: 'Cerrar', onClick: () => render() }]);
+    const ms = document.querySelectorAll('.modal-bg .modal'); if (ms.length) ms[ms.length - 1].classList.add('wide');
+    await reload();
+  }
 
   // ----- Hoja imprimible de códigos de activación para padres -----
   const SHEET_CSS = `.codesheet{font-family:"Segoe UI",Arial,sans-serif;color:#1e2533}
@@ -1744,6 +1849,7 @@
                 if (u.active && !(await confirmBox('Desactivar cuenta', `${u.full_name} ya no podrá entrar y se cerrarán sus sesiones. Puede reactivarla cuando quiera. ¿Desactivar?`))) return;
                 if (await safe(() => superCall('setAccountActive', { user_id: u.id, active: !u.active }))) { toast(u.active ? 'Cuenta desactivada' : 'Cuenta activada', 'ok'); load(); }
               } }, u.active ? 'Desactivar' : 'Activar'),
+              u.role === 'tutor' ? h('button', { class: 'btn sm danger', onclick: async () => { let acc; try { acc = await superCall('getAccount', { user_id: u.id }); } catch (e) { return toast(e.message, 'err'); } deleteTutorFlow(acc, superCall, load); } }, 'Eliminar papá/tutor') : null,
             ]),
         ]), null, 'resp-md'));
     };
