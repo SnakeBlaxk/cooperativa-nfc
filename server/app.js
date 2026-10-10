@@ -210,7 +210,7 @@ async function createServer(opts = {}) {
     const args = req.body || {};
     try { security.guard(req.user, method, args, ctx(req)); } catch (e) { return res.status(STATUS[e.code] || 423).json({ ok: false, error: e.message, code: e.code }); }
     if (Object.prototype.hasOwnProperty.call(removals.methods, method)) {
-      if (['purgeChild', 'purgeTutor'].includes(method)) return res.status(403).json({ ok: false, error: 'Solo el superadministrador puede eliminar definitivamente', code: 'PROHIBIDO' });
+      if (['purgeChild', 'purgeTutor', 'purgeStaff', 'previewDeleteStaff', 'deleteStaff', 'restoreStaff'].includes(method)) return res.status(403).json({ ok: false, error: 'Solo el superadministrador puede eliminar definitivamente', code: 'PROHIBIDO' });
       return send(res, () => removals.methods[method](req.user, args, ctx(req)));
     }
     const prevTutor = method === 'updateChild' && args.id ? (db.get('SELECT tutor_id FROM children WHERE id = ?', [Number(args.id)]) || {}).tutor_id : undefined;

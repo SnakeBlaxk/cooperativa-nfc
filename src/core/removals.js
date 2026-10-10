@@ -144,7 +144,11 @@ function createRemovals(db, { security = null, now = () => new Date() } = {}) {
     const tutors = db.all(`SELECT u.id, u.full_name, u.username, u.email, u.phone, u.deleted_school_id AS school_id, s.name AS school_name, u.deleted_at, u.deleted_by
       FROM users u LEFT JOIN schools s ON s.id = u.deleted_school_id
       WHERE u.role = 'tutor' AND u.deleted_at IS NOT NULL${fs ? ' AND u.deleted_school_id = ' + fs : ''} ORDER BY u.deleted_at DESC LIMIT 1000`).map((r) => ({ ...r, type: 'tutor', days: daysSince(r.deleted_at) }));
-    return { children, tutors, can_purge: !sid };
+    const staff = sid ? [] : db.all(`SELECT u.id, u.full_name, u.username, u.email, u.phone, u.role, u.deleted_school_id AS school_id, s.name AS school_name, u.deleted_at, u.deleted_by,
+        (SELECT COUNT(*) FROM transactions t WHERE t.user_id = u.id) AS movements
+      FROM users u LEFT JOIN schools s ON s.id = u.deleted_school_id
+      WHERE u.role IN ('admin','cajero') AND u.deleted_at IS NOT NULL${fs ? ' AND u.deleted_school_id = ' + fs : ''} ORDER BY u.deleted_at DESC LIMIT 1000`).map((r) => ({ ...r, type: 'personal', days: daysSince(r.deleted_at) }));
+    return { children, tutors, staff, can_purge: !sid };
   }
 
   // Eliminación definitiva (solo superadministrador, solo desde la Papelera).
@@ -180,6 +184,76 @@ function createRemovals(db, { security = null, now = () => new Date() } = {}) {
     return { purged: true };
   }
 
+  // ---------- Personal de escuela (administrador de escuela y cajero): solo el superadministrador ----------
+  // Baja = Papelera (restaurable). La cuenta se desliga de la escuela (school_id NULL, se guarda en deleted_school_id)
+  // para que no cuente como personal en ningún lado; se cierran sus sesiones. Ventas y movimientos se conservan.
+  const STAFF = ['admin', 'cajero'];
+  const ROLE_LABEL = { admin: 'administrador de escuela', cajero: 'cajero' };
+  function getStaff(actor, id, { deleted = false } = {}) {
+    if (!actor) throw new AppError('Sesión no iniciada', 'NO_AUTENTICADO');
+    if (!isSuper(actor)) throw new AppError('Solo el superadministrador puede eliminar cuentas de personal', 'PROHIBIDO');
+    const u = db.get(`SELECT * FROM users WHERE id = ? AND deleted_at IS ${deleted ? 'NOT ' : ''}NULL`, [idOf(id)]);
+    if (u && u.role === 'superadmin') throw new AppError('La cuenta del superadministrador no se puede eliminar', 'PROHIBIDO');
+    if (!u || !STAFF.includes(u.role)) throw new AppError(deleted ? 'La cuenta no está en la Papelera' : 'Cuenta de personal no encontrada', 'NO_ENCONTRADO');
+    return u;
+  }
+  const activeAdmins = (sid, exceptId) => (sid ? db.get("SELECT COUNT(*) AS n FROM users WHERE school_id = ? AND role = 'admin' AND active = 1 AND deleted_at IS NULL AND id <> ?", [sid, exceptId]).n : 0);
+  function previewDeleteStaff(actor, a = {}) {
+    const u = getStaff(actor, a.user_id);
+    const s = u.school_id ? db.get('SELECT id, name FROM schools WHERE id = ?', [u.school_id]) : null;
+    const sales = db.get('SELECT COUNT(*) AS n FROM transactions WHERE user_id = ?', [u.id]).n;
+    const last = u.role === 'admin' && !!s && activeAdmins(s.id, u.id) === 0;
+    return { user: { id: u.id, username: u.username, full_name: u.full_name, role: u.role, active: !!u.active }, school: s, movements: sales,
+      last_admin: last, warning: last ? `Es el último administrador activo de ${s.name}. La escuela se quedará sin administrador hasta que cree o restaure otro.` : null };
+  }
+  // a: { user_id, confirm: nombre de usuario exacto }
+  function deleteStaff(actor, a = {}, ctx = {}) {
+    const u = getStaff(actor, a.user_id);
+    if (String(a.confirm || '').trim() !== u.username) throw new AppError(`Para confirmar escriba exactamente el usuario: ${u.username}`, 'VALIDACION');
+    const pv = previewDeleteStaff(actor, a);
+    const t = ts();
+    db.transaction(() => {
+      db.run('UPDATE users SET active = 0, token_version = token_version + 1, school_id = NULL, deleted_at = ?, deleted_by = ?, deleted_school_id = ?, deleted_info = ? WHERE id = ?',
+        [t, actorName(actor), u.school_id, JSON.stringify({ role: u.role, was_active: !!u.active }), u.id]);
+      db.run('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0', [u.id]);
+      db.run('DELETE FROM push_subscriptions WHERE user_id = ?', [u.id]);
+    });
+    audit(actor, 'personal_baja', { school_id: u.school_id, ip: ctx.ip, target_type: 'user', target_id: u.id,
+      details: { cuenta: u.username, nombre: u.full_name, rol: u.role, escuela: pv.school ? pv.school.name : undefined, ultimo_admin: pv.last_admin || undefined }, severity: pv.last_admin ? 'alta' : 'aviso' });
+    return { deleted: true, user_id: u.id, last_admin: pv.last_admin, warning: pv.warning,
+      message: `Cuenta de ${ROLE_LABEL[u.role]} enviada a la Papelera. Ya no puede entrar; sus ventas y movimientos se conservan.` };
+  }
+  function restoreStaff(actor, a = {}, ctx = {}) {
+    const u = getStaff(actor, a.user_id, { deleted: true });
+    let info = {}; try { info = JSON.parse(u.deleted_info || '{}'); } catch (_) { /* nada */ }
+    const sid = u.deleted_school_id && db.get('SELECT id FROM schools WHERE id = ?', [u.deleted_school_id]) ? u.deleted_school_id : null;
+    if (!sid) throw new AppError('La escuela de esta cuenta ya no existe; no se puede restaurar', 'CONFLICTO');
+    const reactivate = info.was_active !== false;
+    db.run('UPDATE users SET active = ?, school_id = ?, deleted_at = NULL, deleted_by = NULL, deleted_school_id = NULL, deleted_info = NULL, failed_logins = 0, locked_until = NULL WHERE id = ?',
+      [reactivate ? 1 : 0, sid, u.id]);
+    audit(actor, 'personal_restaurado', { school_id: sid, ip: ctx.ip, target_type: 'user', target_id: u.id, details: { cuenta: u.username, nombre: u.full_name, rol: u.role } });
+    return { restored: true, user_id: u.id, message: reactivate ? 'Cuenta restaurada; ya puede entrar de nuevo.' : 'Cuenta restaurada (sigue desactivada, como estaba).' };
+  }
+  function purgeStaff(actor, a = {}, ctx = {}) {
+    needSuper(actor);
+    const u = getStaff(actor, a.user_id, { deleted: true });
+    db.transaction(() => {
+      // Historial intacto: el nombre queda guardado en el movimiento / existencia
+      db.run('UPDATE transactions SET processed_by_name = COALESCE(processed_by_name, ?), user_id = NULL WHERE user_id = ?', [u.full_name, u.id]);
+      db.run('UPDATE stock_moves SET user_name = COALESCE(user_name, ?), user_id = NULL WHERE user_id = ?', [u.full_name, u.id]);
+      db.run('UPDATE invitations SET used_by = NULL WHERE used_by = ?', [u.id]);
+      db.run('UPDATE invitations SET created_by = NULL WHERE created_by = ?', [u.id]);
+      db.run('UPDATE child_change_requests SET tutor_id = NULL WHERE tutor_id = ?', [u.id]);
+      db.run('UPDATE child_change_requests SET resolved_by = NULL WHERE resolved_by = ?', [u.id]);
+      db.run('UPDATE devices SET created_by = NULL WHERE created_by = ?', [u.id]);
+      db.run('UPDATE children SET tutor_id = NULL WHERE tutor_id = ?', [u.id]);
+      for (const tb of ['refresh_tokens', 'password_resets', 'push_subscriptions', 'push_prefs']) db.run(`DELETE FROM ${tb} WHERE user_id = ?`, [u.id]);
+      db.run('DELETE FROM users WHERE id = ?', [u.id]);
+    });
+    audit(actor, 'personal_eliminado_definitivo', { school_id: u.deleted_school_id, ip: ctx.ip, target_type: 'user', target_id: u.id, details: { cuenta: u.username, nombre: u.full_name, rol: u.role }, severity: 'alta' });
+    return { purged: true };
+  }
+
   const methods = {
     previewDeleteChild: (u, a) => previewDeleteChild(u, a),
     deleteChild: (u, a, c) => deleteChild(u, a, c),
@@ -189,8 +263,12 @@ function createRemovals(db, { security = null, now = () => new Date() } = {}) {
     listRemoved: (u, a) => listRemoved(u, a),
     purgeChild: (u, a, c) => purgeChild(u, a, c),
     purgeTutor: (u, a, c) => purgeTutor(u, a, c),
+    previewDeleteStaff: (u, a) => previewDeleteStaff(u, a),
+    deleteStaff: (u, a, c) => deleteStaff(u, a, c),
+    restoreStaff: (u, a, c) => restoreStaff(u, a, c),
+    purgeStaff: (u, a, c) => purgeStaff(u, a, c),
   };
-  return { methods, previewDeleteChild, deleteChild, restoreChild, deleteTutor, restoreTutor, listRemoved, purgeChild, purgeTutor };
+  return { methods, previewDeleteStaff, deleteStaff, restoreStaff, purgeStaff, previewDeleteChild, deleteChild, restoreChild, deleteTutor, restoreTutor, listRemoved, purgeChild, purgeTutor };
 }
 
 module.exports = { createRemovals };

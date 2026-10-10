@@ -136,7 +136,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
   }
   function createStaff(actor, schoolId, data = {}) { need(actor); return makeStaff(getSchool(schoolId).id, data); }
   function staffOf(userId) {
-    const u = db.get("SELECT * FROM users WHERE id = ? AND role IN ('admin','cajero')", [Number(userId) || 0]);
+    const u = db.get("SELECT * FROM users WHERE id = ? AND role IN ('admin','cajero') AND deleted_at IS NULL", [Number(userId) || 0]);
     if (!u) throw new AppError('Usuario no encontrado', 'NO_ENCONTRADO');
     return u;
   }

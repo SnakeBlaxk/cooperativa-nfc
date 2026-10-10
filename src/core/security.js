@@ -381,6 +381,7 @@ function createSecurity(db, opts = {}) {
     need(actor);
     const u = userOr404(userId);
     if (u.role === 'superadmin' && u.id !== actor.id) throw new AppError('No se puede cambiar la contraseña de otro superadministrador', 'PROHIBIDO');
+    if (u.deleted_at) throw new AppError('Esta cuenta está en la Papelera. Restáurela desde la Papelera.', 'VALIDACION');
     const p = password ? str(password, 'contraseña', { min: 8, max: 100 }) : genPassword(12);
     db.transaction(() => {
       db.run('UPDATE users SET password_hash = ?, must_change_password = 0, token_version = token_version + 1, failed_logins = 0, locked_until = NULL, password_set_at = ?, password_set_by = ? WHERE id = ?',
@@ -424,6 +425,7 @@ function createSecurity(db, opts = {}) {
   function updateAccount(actor, data = {}, ctx = {}) {
     need(actor);
     const u = userOr404(data.user_id);
+    if (u.deleted_at) throw new AppError('Esta cuenta está en la Papelera. Restáurela desde la Papelera.', 'VALIDACION');
     const isSuper = u.role === 'superadmin';
     const has = (k) => Object.prototype.hasOwnProperty.call(data, k) && data[k] !== undefined;
     if (isSuper && ((has('username') && String(data.username) !== u.username) || (has('role') && data.role !== u.role)

@@ -719,6 +719,23 @@
       try { await caller('deleteTutor', { user_id: t.id }); toast('Papá/tutor enviado a la Papelera', 'ok'); if (onDone) onDone(); } catch (e) { toast(e.message, 'err'); return false; }
     } }]);
   }
+  // Baja de personal (administrador de escuela / cajero): solo superadministrador; confirmar escribiendo el usuario
+  async function deleteStaffFlow(u, onDone) {
+    const pv = await safe(() => superCall('previewDeleteStaff', { user_id: u.id })); if (!pv) return;
+    const typed = h('input', { placeholder: pv.user.username, autocomplete: 'off', spellcheck: 'false' });
+    modal('Eliminar cuenta', h('div', { class: 'form' },
+      h('p', null, '¿Dar de baja a ', h('b', null, pv.user.full_name), ` (${pv.user.username}), ${pv.user.role === 'admin' ? 'administrador de escuela' : 'cajero'}${pv.school ? ' de ' + pv.school.name : ''}?`),
+      pv.warning ? banner('err', '⚠️', pv.warning) : null,
+      h('ul', { class: 'small' },
+        h('li', null, 'Ya no podrá entrar y se cierran sus sesiones abiertas.'),
+        h('li', null, `Sus ventas y movimientos (${pv.movements}) se conservan en los reportes con su nombre.`),
+        h('li', null, 'Pasa a la Papelera y se puede restaurar.')),
+      field(`Para confirmar escriba el usuario: ${pv.user.username}`, typed)),
+    [{ label: 'Cancelar' }, { label: 'Eliminar cuenta', class: 'danger', onClick: async () => {
+      if (typed.value.trim() !== pv.user.username) { toast('El usuario escrito no coincide', 'err'); return false; }
+      try { const r = await superCall('deleteStaff', { user_id: u.id, confirm: typed.value.trim() }); toast(r.message, 'ok'); if (r.warning) toast(r.warning, 'err'); if (onDone) onDone(); } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+  }
   // Papelera de alumnos y papás/tutores (escuela) — el superadministrador además puede eliminar definitivamente
   async function papeleraView(main, caller, { isSuper = false, schools = [], schoolId = '' } = {}) {
     const school = isSuper ? h('select', null, h('option', { value: '' }, 'Todas las escuelas'), schools.map((s) => h('option', { value: s.id, selected: String(s.id) === String(schoolId) }, s.name))) : null;
@@ -729,10 +746,10 @@
       box.innerHTML = '';
       const purge = (kind, x) => async () => {
         if (!(await confirmBox('Eliminar definitivamente', `${x.full_name} se borrará para siempre y ya no se podrá restaurar. Los movimientos se conservan en los reportes. ¿Continuar?`))) return;
-        if (await safe(() => caller(kind === 'alumno' ? 'purgeChild' : 'purgeTutor', kind === 'alumno' ? { child_id: x.id } : { user_id: x.id }))) { toast('Eliminado definitivamente', 'ok'); load(); }
+        if (await safe(() => caller(kind === 'alumno' ? 'purgeChild' : kind === 'personal' ? 'purgeStaff' : 'purgeTutor', kind === 'alumno' ? { child_id: x.id } : { user_id: x.id }))) { toast('Eliminado definitivamente', 'ok'); load(); }
       };
       const restore = (kind, x) => async () => {
-        const res = await safe(() => caller(kind === 'alumno' ? 'restoreChild' : 'restoreTutor', kind === 'alumno' ? { child_id: x.id } : { user_id: x.id }));
+        const res = await safe(() => caller(kind === 'alumno' ? 'restoreChild' : kind === 'personal' ? 'restoreStaff' : 'restoreTutor', kind === 'alumno' ? { child_id: x.id } : { user_id: x.id }));
         if (res) { toast(res.message || 'Restaurado', 'ok'); load(); }
       };
       const acts = (kind, x) => h('div', { class: 'row', style: { justifyContent: 'flex-end', gap: '6px' } },
@@ -748,10 +765,15 @@
           r.tutors.map((u) => [h('div', null, h('b', null, u.full_name), h('div', { class: 'small muted' }, [u.username, u.email, u.phone].filter(Boolean).join(' · '))),
             isSuper ? u.school_name || '—' : null, h('span', { title: fmtDate(u.deleted_at) }, ago(u.days)), u.deleted_by || '—', acts('tutor', u)].filter((x) => x !== null)), null, 'resp-md')
           : h('div', { class: 'empty' }, 'No hay papás/tutores en la Papelera')));
+      if (isSuper) box.appendChild(h('div', { class: 'card tablewrap', style: { marginTop: '16px' } }, h('h2', null, `Personal dado de baja (${(r.staff || []).length})`),
+        (r.staff || []).length ? respTable([{ label: 'Cuenta' }, { label: 'Jerarquía' }, { label: 'Escuela' }, { label: 'Dado de baja' }, { label: 'Por' }, { label: 'Movimientos', right: true }, { label: '', right: true }],
+          r.staff.map((u) => [h('div', null, h('b', null, u.full_name), h('div', { class: 'small muted' }, [u.username, u.email, u.phone].filter(Boolean).join(' · '))),
+            u.role === 'admin' ? 'Administrador' : 'Cajero', u.school_name || '—', h('span', { title: fmtDate(u.deleted_at) }, ago(u.days)), u.deleted_by || '—', String(u.movements), acts('personal', u)]), null, 'resp-md')
+          : h('div', { class: 'empty' }, 'No hay cuentas de personal en la Papelera')));
     };
     if (school) school.addEventListener('change', load);
     put(main, pageHead('Papelera', isSuper
-      ? 'Alumnos y papás/tutores dados de baja en las escuelas. Puede restaurarlos o eliminarlos definitivamente.'
+      ? 'Alumnos, papás/tutores y personal (administradores y cajeros) dados de baja. Puede restaurarlos o eliminarlos definitivamente.'
       : 'Alumnos y papás/tutores dados de baja. Puede restaurarlos cuando quiera (se guardan al menos 30 días; solo Zuki Company los elimina definitivamente).'),
     school ? h('div', { class: 'card filters' }, field('Escuela', school)) : null, box);
     await load();
@@ -1850,6 +1872,7 @@
                 if (await safe(() => superCall('setAccountActive', { user_id: u.id, active: !u.active }))) { toast(u.active ? 'Cuenta desactivada' : 'Cuenta activada', 'ok'); load(); }
               } }, u.active ? 'Desactivar' : 'Activar'),
               u.role === 'tutor' ? h('button', { class: 'btn sm danger', onclick: async () => { let acc; try { acc = await superCall('getAccount', { user_id: u.id }); } catch (e) { return toast(e.message, 'err'); } deleteTutorFlow(acc, superCall, load); } }, 'Eliminar papá/tutor') : null,
+              ['admin', 'cajero'].includes(u.role) ? h('button', { class: 'btn sm danger', onclick: () => deleteStaffFlow(u, load) }, '🗑️ Eliminar') : null,
             ]),
         ]), null, 'resp-md'));
     };
