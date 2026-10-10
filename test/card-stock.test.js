@@ -114,6 +114,38 @@ test('superadmin: eliminar solo si la escuela no la registró; regresar a stock;
   assert.equal(S.db.get("SELECT school_id FROM card_stock WHERE uid = '0001234569'").school_id, null);
 });
 
+test('superadmin: eliminar definitivamente (tarjeta registrada por la escuela); rechaza alumno activo; conserva historial', async () => {
+  // 0001234567 está asignada a un alumno activo y tiene movimientos
+  let r = await sup('stockPurge', { uids: ['0001234567'] });
+  assert.equal(r.data.removed, 0); assert.match(r.data.skipped[0].motivo, /alumno activo/);
+  assert.ok(S.db.get("SELECT 1 AS x FROM cards WHERE uid = '0001234567'"));
+  assert.equal((await rpc('stockPurge', { uids: ['0001234567'] }, A)).ok, false);
+  // tarjeta de prueba registrada por la escuela, con movimientos y alumno dado de baja
+  const uid = '0005550001';
+  await sup('stockAdd', { uid, school_id: 1 });
+  const kid = (await rpc('createChild', { full_name: 'Alumno Temporal', grade: '3C' }, A)).data.id;
+  r = await rpc('registerCard', { uid, child_id: kid }, A); assert.equal(r.ok, true, r.error);
+  const card = S.db.get('SELECT * FROM cards WHERE uid = ?', [uid]);
+  if (!card.child_id) S.db.run('UPDATE cards SET child_id = ? WHERE id = ?', [kid, card.id]);
+  S.db.run("INSERT INTO transactions (school_id, type, status, amount_cents, card_id, card_uid, child_id, created_at) VALUES (1, 'recarga', 'aprobado', 100, ?, ?, ?, '2026-01-01 00:00:00')", [card.id, uid, kid]);
+  S.db.run('UPDATE cards SET balance_cents = 0 WHERE id = ?', [card.id]);
+  S.db.run("UPDATE children SET active = 0, deleted_at = '2026-01-02' WHERE id = ?", [kid]);
+  r = await sup('stockPurge', { uids: [uid] });
+  assert.equal(r.data.removed, 1, JSON.stringify(r));
+  assert.equal(S.db.get('SELECT 1 AS x FROM cards WHERE uid = ?', [uid]), undefined);
+  assert.equal(S.db.get('SELECT 1 AS x FROM card_stock WHERE uid = ?', [uid]), undefined);
+  const tx = S.db.all('SELECT * FROM transactions WHERE card_uid = ?', [uid]);
+  assert.ok(tx.length >= 1); assert.ok(tx.every((t) => t.card_id === null));
+  assert.equal(S.db.get('PRAGMA foreign_key_check'), undefined);
+  assert.ok(S.db.get("SELECT 1 AS x FROM audit_log WHERE action = 'inventario_tarjetas_eliminacion_definitiva'"));
+  // tarjeta con saldo no se elimina
+  const uid2 = '0005550002';
+  await sup('stockAdd', { uid: uid2, school_id: 1 });
+  assert.equal((await rpc('registerCard', { uid: uid2 }, A)).ok, true);
+  S.db.run('UPDATE cards SET balance_cents = 500, child_id = NULL WHERE uid = ?', [uid2]);
+  r = await sup('stockPurge', { uids: [uid2] }); assert.equal(r.data.removed, 0); assert.match(r.data.skipped[0].motivo, /saldo/);
+});
+
 test('migración: tarjetas existentes pasan al inventario como entregadas (o asignadas) a su escuela, una sola vez', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coop-stock-'));
   const file = path.join(dir, 'old.db');

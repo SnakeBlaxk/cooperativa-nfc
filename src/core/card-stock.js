@@ -171,6 +171,32 @@ function createCardStock(db, { security = null, now = () => new Date() } = {}) {
     if (n) audit(actor, 'inventario_tarjetas_baja', { ip: ctx.ip, target_type: 'card_stock', details: { cantidad: n, uids: rows.slice(0, 20).map((r) => r.uid) }, severity: 'aviso' });
     return { removed: n, skipped };
   }
+  // Eliminar definitivamente (solo superadmin): también borra el registro de la escuela (tabla cards)
+  // si NO está asignada a un alumno activo. Si el alumno fue dado de baja, primero se desasigna.
+  // El historial de movimientos se conserva: card_id queda en NULL y card_uid conserva el UID.
+  function purge(actor, a = {}, ctx = {}) {
+    need(actor);
+    const rows = select(a); const done = []; const skipped = []; const detail = [];
+    db.transaction(() => {
+      for (const s of rows) {
+        const card = db.get('SELECT * FROM cards WHERE uid = ?', [s.uid]);
+        let info = { uid: s.uid, escuela_id: s.school_id };
+        if (card) {
+          const child = card.child_id ? db.get('SELECT id, full_name, active, deleted_at FROM children WHERE id = ?', [card.child_id]) : null;
+          if (child && child.active && !child.deleted_at) { skipped.push({ uid: s.uid, motivo: `asignada a un alumno activo (${child.full_name}); desasígnela primero` }); continue; }
+          if (card.balance_cents > 0) { skipped.push({ uid: s.uid, motivo: 'tiene saldo; reembolse o transfiera el saldo primero' }); continue; }
+          if (card.child_id) db.run('UPDATE cards SET child_id = NULL WHERE id = ?', [card.id]);
+          const tx = db.run('UPDATE transactions SET card_uid = COALESCE(card_uid, ?), card_id = NULL WHERE card_id = ?', [card.uid, card.id]);
+          db.run('DELETE FROM cards WHERE id = ?', [card.id]);
+          info = { ...info, card_id: card.id, escuela_tarjeta: card.school_id, alumno_dado_de_baja: child ? child.id : undefined, movimientos_conservados: tx && tx.changes !== undefined ? tx.changes : undefined };
+        }
+        db.run('DELETE FROM card_stock WHERE id = ?', [s.id]);
+        done.push(s.uid); detail.push(info);
+      }
+    });
+    if (done.length) audit(actor, 'inventario_tarjetas_eliminacion_definitiva', { ip: ctx.ip, target_type: 'card_stock', details: { cantidad: done.length, tarjetas: detail.slice(0, 50), omitidas: skipped.length }, severity: 'alta' });
+    return { removed: done.length, removed_uids: done, skipped };
+  }
   function exportCsv(actor, f = {}) {
     const rows = list(actor, f);
     const q = (v) => (v === null || v === undefined ? '' : `"${String(v).replace(/"/g, '""')}"`);
@@ -188,9 +214,10 @@ function createCardStock(db, { security = null, now = () => new Date() } = {}) {
     stockSetStatus: (u, a, c) => setStatus(u, a, c),
     stockUpdate: (u, a, c) => update(u, a, c),
     stockRemove: (u, a, c) => remove(u, a, c),
+    stockPurge: (u, a, c) => purge(u, a, c),
     stockExport: (u, a) => exportCsv(u, a),
   };
-  return { methods, list, summary, add, deliver, setStatus, update, remove, exportCsv };
+  return { methods, list, summary, add, deliver, setStatus, update, remove, purge, exportCsv };
 }
 
 module.exports = { createCardStock, parseUidList, STATES };

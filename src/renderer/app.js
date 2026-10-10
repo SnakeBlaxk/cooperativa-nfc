@@ -2073,6 +2073,11 @@
       const r = await safe(() => superCall('stockRemove', { ids }));
       if (r) { toast(`${r.removed} eliminada(s)` + (r.skipped.length ? ` · ${r.skipped.length} omitida(s)` : ''), 'ok'); selected.clear(); reload(); }
     };
+    const purgeCards = async (ids) => {
+      if (!(await confirmBox('Eliminar definitivamente', `¿Eliminar DEFINITIVAMENTE ${ids.length} tarjeta(s)? También se borra el registro de la tarjeta en la escuela (p. ej. tarjetas de prueba). El historial de movimientos se conserva. No se eliminan las asignadas a un alumno activo ni las que tienen saldo. Esta acción no se puede deshacer.`))) return;
+      const r = await safe(() => superCall('stockPurge', { ids }));
+      if (r) { toast(`${r.removed} eliminada(s) definitivamente` + (r.skipped.length ? ` · ${r.skipped.length} omitida(s): ${r.skipped[0].motivo}` : ''), r.removed ? 'ok' : 'err'); selected.clear(); reload(); }
+    };
     const editCard = (c) => {
       const k = h('select', null, ['normal', 'personalizada'].map((x) => h('option', { value: x, selected: c.kind === x }, x === 'normal' ? 'Normal' : 'Personalizada')));
       const b = h('input', { value: c.batch || '' }); const n = h('input', { value: c.note || '' });
@@ -2089,7 +2094,8 @@
         h('button', { class: 'btn sm', disabled: !ids.length, onclick: () => bulkStatus('bloqueada', ids) }, '⛔ Bloquear'),
         h('button', { class: 'btn sm', disabled: !ids.length, onclick: () => bulkStatus('danada', ids) }, 'Dañada'),
         h('button', { class: 'btn sm', disabled: !ids.length, onclick: () => bulkStatus('desbloquear', ids) }, 'Desbloquear'),
-        h('button', { class: 'btn sm danger', disabled: !ids.length, onclick: () => removeCards(ids) }, 'Eliminar'));
+        h('button', { class: 'btn sm danger', disabled: !ids.length, onclick: () => removeCards(ids) }, 'Eliminar'),
+        h('button', { class: 'btn sm danger', disabled: !ids.length, onclick: () => purgeCards(ids) }, '🗑 Eliminar definitivamente'));
     };
     const reload = async () => {
       const [rows, s2] = await Promise.all([superCall('stockList', filters()), superCall('stockSummary')]);
@@ -2112,7 +2118,7 @@
             h('td', { 'data-label': 'Lote / nota', class: 'small' }, [c.batch, c.note].filter(Boolean).join(' · ') || '—'),
             h('td', { class: 'right', style: { whiteSpace: 'nowrap' } }, h('button', { class: 'btn sm', onclick: () => editCard(c) }, 'Editar'), ' ',
               ['bloqueada', 'danada'].includes(c.status) ? h('button', { class: 'btn sm', onclick: () => bulkStatus('desbloquear', [c.id]) }, 'Desbloquear') : h('button', { class: 'btn sm', onclick: () => bulkStatus('bloqueada', [c.id]) }, 'Bloquear'), ' ',
-              !c.card_id ? h('button', { class: 'btn sm danger', onclick: () => removeCards([c.id]) }, 'Eliminar') : null));
+              !c.card_id ? h('button', { class: 'btn sm danger', onclick: () => removeCards([c.id]) }, 'Eliminar') : h('button', { class: 'btn sm danger', onclick: () => purgeCards([c.id]) }, 'Eliminar definitivamente')));
         })) : h('div', { class: 'empty' }, 'No hay tarjetas con esos filtros'), h('p', { class: 'small muted' }, `${rows.length} tarjeta(s) mostradas`));
     };
     for (const el of [fSt, fSch]) el.addEventListener('change', reload);
