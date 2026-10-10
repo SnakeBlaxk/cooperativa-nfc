@@ -60,7 +60,7 @@ function normPhone(p) {
 }
 function normUid(uid) {
   const s = str(uid, 'UID de tarjeta', { min: 4, max: 64 });
-  const u = s.replace(/[\s:\-]/g, '').toUpperCase();
+  const u = s.replace(/[\s:\-._,;]/g, '').toUpperCase();
   if (!/^[0-9A-Z]{4,64}$/.test(u)) throw new AppError('UID de tarjeta inválido', 'VALIDACION');
   return u;
 }
@@ -482,6 +482,50 @@ function createService(db, opts = {}) {
     return { deleted: true, soft: true, product: { id: p.id, name: p.name, school_id: p.school_id }, message: 'Producto enviado a la papelera (se puede restaurar).' };
   }
 
+  // ---------- inventario de tarjetas (lista blanca del superadministrador) ----------
+  // Una tarjeta solo se registra, asigna, cobra o recarga si su UID está en el inventario de Zuki Company,
+  // entregada a ESA escuela y no bloqueada/dañada. Se activa en el servidor (opts.cardStock).
+  const enforceStock = opts.cardStock === true;
+  const NOT_AUTH = 'Tarjeta no autorizada. Solicite tarjetas a Zuki Company.';
+  const OP_LABEL = { registrar: 'registrar tarjeta', asignar: 'asignar tarjeta', venta: 'venta', recarga: 'recarga', reemplazo: 'tarjeta de reemplazo' };
+  function stockProblem(uid, schoolId) {
+    const s = db.get('SELECT * FROM card_stock WHERE uid = ?', [uid]);
+    if (!s) return 'no está en el inventario de Zuki Company';
+    if (s.status === 'bloqueada') return 'bloqueada en el inventario';
+    if (s.status === 'danada') return 'marcada como dañada';
+    if (s.status === 'en_stock' || s.school_id === null || s.school_id === undefined) return 'no ha sido entregada a ninguna escuela';
+    if (s.school_id !== schoolId) return `entregada a otra escuela (${schoolName(s.school_id) || '#' + s.school_id})`;
+    return null;
+  }
+  function assertCardAuthorized(actor, uid, op, schoolId) {
+    if (!enforceStock) return;
+    const why = stockProblem(uid, schoolId);
+    if (!why) return;
+    const school = schoolName(schoolId) || (schoolId ? '#' + schoolId : '—');
+    const who = (actor && (actor.full_name || actor.username)) || '?';
+    const details = JSON.stringify({ uid, escuela: school, usuario: who, rol: actor && actor.role, operacion: OP_LABEL[op] || op, motivo: why });
+    try {
+      const t = ts(); const since = fmtLocal(new Date(now().getTime() - 10 * 60000));
+      // Una alerta por tarjeta/escuela cada 10 min (el lector puede leer la misma tarjeta varias veces)
+      if (!db.get('SELECT id FROM alerts WHERE kind = ? AND school_id IS ? AND details = ? AND created_at >= ? AND ack_at IS NULL', ['tarjeta_no_autorizada', schoolId || null, details, since])) {
+        db.run('INSERT INTO alerts (created_at, school_id, kind, severity, message, details, ref_type, ref_id) VALUES (?,?,?,?,?,?,?,?)',
+          [t, schoolId || null, 'tarjeta_no_autorizada', 'alta', `Tarjeta no autorizada ${uid} en ${school} (${OP_LABEL[op] || op}, por ${who}): ${why}.`, details, null, null]);
+      }
+      db.run('INSERT INTO audit_log (created_at, actor_id, actor_name, actor_role, school_id, ip, action, target_type, target_id, details, severity) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [t, (actor && actor.id) || null, who, (actor && actor.role) || null, schoolId || null, null, 'tarjeta_no_autorizada', 'card', uid, details, 'alta']);
+    } catch (e) { console.error('[tarjetas] alerta:', e.message); }
+    throw new AppError(NOT_AUTH, 'TARJETA_NO_AUTORIZADA');
+  }
+  const stockScope = (actor) => { const id = sch(actor); return id === null ? '' : ` AND uid IN (SELECT uid FROM card_stock WHERE school_id = ${id})`; };
+  // Tarjetas del inventario entregadas a la escuela del administrador (para registrar/asignar)
+  function listSchoolStock(actor) {
+    requireRole(actor, 'admin');
+    const id = sch(actor);
+    return db.all(`SELECT s.uid, s.kind, s.status, s.batch, s.delivered_at, k.id AS card_id, k.child_id, c.full_name AS child_name
+      FROM card_stock s LEFT JOIN cards k ON k.uid = s.uid LEFT JOIN children c ON c.id = k.child_id
+      WHERE s.school_id = ? AND s.status IN ('entregada','asignada') ORDER BY s.status, s.uid`, [id]);
+  }
+
   // ---------- tarjetas ----------
   function cardRow(k) {
     if (!k) return null;
@@ -490,7 +534,11 @@ function createService(db, opts = {}) {
   }
   function listCards(actor) {
     requireRole(actor, 'admin', 'cajero');
-    return db.all(`SELECT * FROM cards WHERE 1=1${scope(actor)} ORDER BY id DESC`).map(cardRow);
+    return db.all(`SELECT * FROM cards WHERE 1=1${scope(actor)}${enforceStock ? stockScope(actor) : ''} ORDER BY id DESC`).map((k) => {
+      const row = cardRow(k);
+      if (enforceStock) { const st = db.get('SELECT status FROM card_stock WHERE uid = ?', [k.uid]); row.stock_status = st ? st.status : null; }
+      return row;
+    });
   }
   function getCardByUid(uid, actor) { return db.get(`SELECT * FROM cards WHERE uid = ?${scope(actor)}`, [normUid(uid)]); }
   function getCardOrFail(actor, cardId) {
@@ -521,6 +569,7 @@ function createService(db, opts = {}) {
   function registerCard(actor, data) {
     requireRole(actor, 'admin');
     const uid = normUid(data.uid);
+    assertCardAuthorized(actor, uid, data.child_id ? 'asignar' : 'registrar', sch(actor));
     assertUidFree(uid, 'Esa tarjeta (UID) ya está registrada', actor);
     let child_id = null; let status = 'sin_asignar';
     if (data.child_id) {
@@ -540,6 +589,7 @@ function createService(db, opts = {}) {
   function assignCard(actor, cardId, childId) {
     requireRole(actor, 'admin');
     const k = getCardOrFail(actor, cardId);
+    assertCardAuthorized(actor, k.uid, 'asignar', k.school_id);
     if (k.status === 'perdida') throw new AppError('Una tarjeta reportada como perdida no puede reasignarse', 'VALIDACION');
     const c = getChildOrFail(childId, actor);
     if (db.get("SELECT id FROM cards WHERE child_id = ? AND status IN ('activa','bloqueada') AND id <> ?", [c.id, k.id])) {
@@ -558,6 +608,7 @@ function createService(db, opts = {}) {
     requireRole(actor, 'admin');
     const uid = normUid(data.uid);
     const c = getChildOrFail(data.child_id, actor);
+    assertCardAuthorized(actor, uid, 'asignar', sch(actor) === null ? c.school_id : sch(actor));
     const k = db.get('SELECT * FROM cards WHERE uid = ?', [uid]);
     if (!k) return registerCard(actor, { uid, child_id: c.id });
     if (k.school_id !== sch(actor) && !single) throw new AppError('Esa tarjeta (UID) ya está registrada en otra escuela', 'DUPLICADO');
@@ -598,6 +649,7 @@ function createService(db, opts = {}) {
     const k = getCardOrFail(actor, cardId);
     if (k.status === 'perdida') throw new AppError('La tarjeta ya está reportada como perdida', 'VALIDACION');
     const uid = newUid ? normUid(newUid) : null;
+    if (uid) assertCardAuthorized(actor, uid, 'reemplazo', k.school_id);
     if (uid) assertUidFree(uid, 'El UID nuevo ya está registrado', actor);
     return db.transaction(() => {
       const t = ts();
@@ -711,6 +763,7 @@ function createService(db, opts = {}) {
     const amount = cents(data.amount_cents, 'monto de recarga');
     if (amount > 500000) throw new AppError('La recarga máxima es de $5,000.00 MXN', 'VALIDACION');
     const note = str(data.note, 'nota', { optional: true, max: 200 });
+    assertCardAuthorized(actor, normUid(data.uid), 'recarga', sch(actor));
     return db.transaction(() => {
       const k = getCardByUid(data.uid, actor);
       if (!k) throw new AppError('Tarjeta no registrada', 'NO_ENCONTRADO');
@@ -753,6 +806,7 @@ function createService(db, opts = {}) {
       const q = int(it.qty, 'cantidad', { min: 1, max: 100 });
       qtyById.set(pid, (qtyById.get(pid) || 0) + q);
     }
+    assertCardAuthorized(actor, uid, 'venta', sch(actor));
 
     const outcome = db.transaction(() => {
       const t = ts();
@@ -1037,7 +1091,7 @@ function createService(db, opts = {}) {
     addStock, listStockMoves, getInventorySettings, setInventorySettings, listSchoolNotices, markNoticesRead, checkLowStock,
     reverseSale, report, getPushPrefs, getPushPrefsRaw, setPushPrefs, pushSubscribe, pushUnsubscribe,
     listCategories, createCategory, listProducts, createProduct, updateProduct, deleteProduct,
-    listCards, registerCard, assignCard, assignCardByUid, unassignCard, setCardStatus, reportLostAndReplace, lookupCard,
+    listCards, listSchoolStock, registerCard, assignCard, assignCardByUid, unassignCard, setCardStatus, reportLostAndReplace, lookupCard,
     getLimits, setLimits, getProhibitions, setProhibitions,
     recharge, adjust, purchase, listMovements, childSummary, dashboard,
   };

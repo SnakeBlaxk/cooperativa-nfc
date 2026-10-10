@@ -28,7 +28,7 @@ let Z, B_ID, A_ID;
 const setEnd = (sid, end, extra = '') => S.db.run(`UPDATE schools SET status = CASE WHEN status = 'pausada' THEN 'activa' ELSE status END, period_start = ?, period_end = ?, billing_notice = NULL ${extra} WHERE id = ?`, [addDays(end, -30), end, sid]);
 
 before(async () => {
-  S = await createServer({ jwtSecret: 'b'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0, legacySync: true });
+  S = await createServer({ cardStock: false, jwtSecret: 'b'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0, legacySync: true });
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;
   Z = (await tok('zuki', 'zuki123')).access_token;

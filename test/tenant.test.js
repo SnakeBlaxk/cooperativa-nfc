@@ -32,7 +32,7 @@ const sup = (m, body, token) => api('/api/super/' + m, { body: body || {}, token
 const idOf = (table, col, val) => S.db.get(`SELECT id FROM ${table} WHERE ${col} = ?`, [val]).id;
 
 async function start(opts) {
-  S = await createServer({ jwtSecret: 't'.repeat(40), mailer: consoleMailer(() => {}), legacySync: true, ...opts });
+  S = await createServer({ cardStock: false, jwtSecret: 't'.repeat(40), mailer: consoleMailer(() => {}), legacySync: true, ...opts });
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;
 }

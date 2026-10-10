@@ -188,6 +188,20 @@ CREATE TABLE IF NOT EXISTS devices (                -- servidor: equipos de escr
   last_seen_at TEXT,
   created_at TEXT NOT NULL
 );
+-- Inventario de tarjetas del superadministrador (lista blanca de UID de Zuki Company)
+CREATE TABLE IF NOT EXISTS card_stock (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL DEFAULT 'normal' CHECK (kind IN ('normal','personalizada')),
+  status TEXT NOT NULL DEFAULT 'en_stock' CHECK (status IN ('en_stock','entregada','asignada','bloqueada','danada')),
+  school_id INTEGER REFERENCES schools(id),
+  batch TEXT,
+  note TEXT,
+  delivered_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_card_stock_school ON card_stock(school_id, status);
 -- Seguridad (servidor): bitácora de auditoría, alertas y ajustes por escuela
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -424,6 +438,25 @@ class Database {
       CREATE INDEX IF NOT EXISTS idx_cards_school ON cards(school_id);
       CREATE INDEX IF NOT EXISTS idx_tx_school_date ON transactions(school_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_sync_changes_school ON sync_changes(school_id, seq);`);
+    // Inventario de tarjetas (v2.2): las tarjetas que ya existían en las escuelas se agregan al inventario
+    // como entregadas a su escuela (o asignadas si tienen alumno) para que nada deje de funcionar. Una sola vez.
+    if (!this.get("SELECT value FROM meta WHERE key = 'card_stock_v1'")) {
+      const before = this.get('SELECT COUNT(*) AS n FROM card_stock').n;
+      this.db.exec(`INSERT OR IGNORE INTO card_stock (uid, kind, status, school_id, note, delivered_at, created_at)
+        SELECT uid, 'normal', CASE WHEN child_id IS NOT NULL AND status IN ('activa','bloqueada') THEN 'asignada' ELSE 'entregada' END, school_id,
+          'Migración automática (tarjeta existente)', created_at, datetime('now','localtime') FROM cards WHERE school_id IS NOT NULL`);
+      const n = this.get('SELECT COUNT(*) AS n FROM card_stock').n - before;
+      this.db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('card_stock_v1', ?)", [JSON.stringify({ migrated: n, at: new Date().toISOString() })]);
+      this.cardStockMigrated = n;
+      if (n) console.log(`[db] Inventario de tarjetas: ${n} tarjeta(s) existentes agregadas como entregadas a su escuela`);
+    }
+    // El estado "asignada" del inventario sigue a la tarjeta de la escuela (con alumno = asignada; sin alumno = entregada)
+    this.db.exec(`CREATE TRIGGER IF NOT EXISTS trg_card_stock_ins AFTER INSERT ON cards
+        BEGIN UPDATE card_stock SET status = CASE WHEN NEW.child_id IS NOT NULL AND NEW.status IN ('activa','bloqueada') THEN 'asignada' ELSE 'entregada' END
+          WHERE uid = NEW.uid AND status IN ('entregada','asignada') AND school_id IS NEW.school_id; END;
+      CREATE TRIGGER IF NOT EXISTS trg_card_stock_upd AFTER UPDATE OF child_id, status ON cards
+        BEGIN UPDATE card_stock SET status = CASE WHEN NEW.child_id IS NOT NULL AND NEW.status IN ('activa','bloqueada') THEN 'asignada' ELSE 'entregada' END
+          WHERE uid = NEW.uid AND status IN ('entregada','asignada') AND school_id IS NEW.school_id; END;`);
     // Protección del superadministrador: no se puede borrar, degradar ni desactivar (ni por SQL de la app)
     this.db.exec(`CREATE TRIGGER IF NOT EXISTS trg_superadmin_nodelete BEFORE DELETE ON users WHEN OLD.role = 'superadmin'
         BEGIN SELECT RAISE(ABORT, 'El superadministrador no se puede eliminar'); END;

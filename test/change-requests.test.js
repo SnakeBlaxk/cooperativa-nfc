@@ -19,7 +19,7 @@ const rpc = (m, body, token) => api('/api/rpc/' + m, { body: body || {}, token }
 const child = (name) => S.db.get('SELECT * FROM children WHERE full_name = ?', [name]);
 const PHOTO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 before(async () => {
-  S = await createServer({ jwtSecret: 'c'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0 });
+  S = await createServer({ cardStock: false, jwtSecret: 'c'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0 });
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;
   [A, A2, C, M, J] = [await tok('admin', 'admin123'), await tok('admin2', 'admin123'), await tok('cajero', 'cajero123'), await tok('maria', 'tutor123'), await tok('juan', 'tutor123')];

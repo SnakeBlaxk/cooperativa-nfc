@@ -7,7 +7,7 @@ const bcrypt = require('bcryptjs');
 const { AppError, fmtLocal, str, normEmail, normPhone } = require('./service');
 
 // Métodos de la API que solo leen (todo lo demás se considera escritura)
-const READ_METHODS = new Set(['listUsers', 'listChildren', 'listCategories', 'listProducts', 'listCards', 'lookupCard', 'getLimits', 'getProhibitions', 'listMovements', 'childSummary', 'dashboard', 'listChangeRequests', 'changeRequestsUnread', 'markChangeRequestsRead', 'listStockMoves', 'getInventorySettings', 'listSchoolNotices', 'markNoticesRead', 'report', 'getPushPrefs', 'setPushPrefs', 'pushSubscribe', 'pushUnsubscribe', 'securityStatus', 'me', 'login', 'logout']);
+const READ_METHODS = new Set(['listUsers', 'listSchoolStock', 'listChildren', 'listCategories', 'listProducts', 'listCards', 'lookupCard', 'getLimits', 'getProhibitions', 'listMovements', 'childSummary', 'dashboard', 'listChangeRequests', 'changeRequestsUnread', 'markChangeRequestsRead', 'listStockMoves', 'getInventorySettings', 'listSchoolNotices', 'markNoticesRead', 'report', 'getPushPrefs', 'setPushPrefs', 'pushSubscribe', 'pushUnsubscribe', 'securityStatus', 'me', 'login', 'logout']);
 const DEFAULTS = { large_recharge_cents: 100000, hours_start: '07:00', hours_end: '16:00' };
 const LOCKDOWN_PHRASE = 'ALERTA ROJA';
 

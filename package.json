@@ -19,7 +19,8 @@
     "e2e:mensualidad": "electron scripts/e2e-mensualidad.js",
     "e2e:admin": "electron scripts/e2e-admin.js",
     "e2e:solicitudes": "electron scripts/e2e-solicitudes.js",
-    "e2e:v21": "electron scripts/e2e-v21.js"
+    "e2e:v21": "electron scripts/e2e-v21.js",
+    "e2e:tarjetas": "electron scripts/e2e-tarjetas.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -11,6 +11,12 @@ function ensureDefaultSchool(db, name = 'Mi escuela') {
   return db.run("INSERT INTO schools (name, status, created_at) VALUES (?, 'activa', datetime('now','localtime'))", [name]).lastId;
 }
 
+// Tarjetas de demostración: se agregan al inventario de Zuki Company como entregadas a su escuela
+function stockDemoCards(db) {
+  db.run(`INSERT OR IGNORE INTO card_stock (uid, kind, status, school_id, batch, note, delivered_at, created_at)
+    SELECT uid, 'normal', CASE WHEN child_id IS NOT NULL AND status IN ('activa','bloqueada') THEN 'asignada' ELSE 'entregada' END, school_id, 'DEMO', 'Tarjeta de demostración', created_at, created_at FROM cards WHERE school_id IS NOT NULL`);
+}
+
 function seed(db, { withSamples = true, schoolName = 'Mi escuela' } = {}) {
   if (!isEmpty(db)) return false;
   let clock = new Date();
@@ -85,6 +91,7 @@ function seed(db, { withSamples = true, schoolName = 'Mi escuela' } = {}) {
       clock = new Date();
     }
   });
+  stockDemoCards(db);
   return true;
 }
 
@@ -152,7 +159,8 @@ function seedPlatform(db) {
     svc.purchase(caj, { uid: '05B2B2B2B2B2B2', items: [{ product_id: prod['Torta de jamón'], qty: 1 }] });
     clock = new Date();
   });
+  stockDemoCards(db);
   return true;
 }
 
-module.exports = { seed, seedMinimal, seedPlatform, ensureSuperadmin, ensureDefaultSchool, isEmpty, DEFAULT_CATEGORIES };
+module.exports = { seed, seedMinimal, seedPlatform, ensureSuperadmin, ensureDefaultSchool, isEmpty, stockDemoCards, DEFAULT_CATEGORIES };

@@ -15,7 +15,7 @@ const rpc = (m, body, token) => api('/api/rpc/' + m, { body: body || {}, token }
 const sup = (m, body) => api('/api/super/' + m, { body: body || {}, token: Z });
 const id = (sql, p = []) => S.db.get(sql, p).id;
 before(async () => {
-  S = await createServer({ jwtSecret: 'f'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0 });
+  S = await createServer({ cardStock: false, jwtSecret: 'f'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0 });
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;
   [Z, A, C, M] = [await tok('zuki', 'zuki123'), await tok('admin', 'admin123'), await tok('cajero', 'cajero123'), await tok('maria', 'tutor123')];

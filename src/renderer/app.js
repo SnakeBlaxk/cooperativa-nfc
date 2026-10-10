@@ -125,7 +125,7 @@
   // ---------- navegación ----------
   // Menú agrupado por tema: [título del grupo, [[vista, etiqueta, ícono], ...]]
   const NAV = {
-    superadmin: [['Plataforma', [['instituciones', 'Escuelas', '🏫'], ['cuentas', 'Cuentas', '👥']]],
+    superadmin: [['Plataforma', [['instituciones', 'Escuelas', '🏫'], ['inventario', 'Mis tarjetas (inventario)', '🪪'], ['cuentas', 'Cuentas', '👥']]],
       ['Seguridad', [['seguridad', 'Seguridad y emergencia', '🛡️'], ['alertas', 'Alertas', '🔔'], ['bitacora', 'Bitácora', '📜']]],
       ['Mi cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
     admin: [['Inicio', [['dashboard', 'Resumen', '📊'], ['notificaciones', 'Notificaciones', '📬']]],
@@ -607,7 +607,7 @@
 
   // ----- Tarjetas -----
   VIEWS.tarjetas = async (main) => {
-    const [cards, children] = await Promise.all([call('listCards'), call('listChildren')]);
+    const [cards, children, stock] = await Promise.all([call('listCards'), call('listChildren'), call('listSchoolStock').catch(() => null)]);
     const childOpts = (sel) => [h('option', { value: '' }, '— Sin asignar (inventario) —'), ...children.map((c) => h('option', { value: c.id, selected: sel === c.id }, `${c.full_name} (${c.tutor ? c.tutor.full_name : ''})${c.card ? ' — ya tiene tarjeta' : ''}`))];
     const uidIn = h('input', { placeholder: 'Pase la tarjeta por el lector o escriba el UID y presione Enter', class: 'grow', autocomplete: 'off', 'data-uid-input': '' });
     const childSel = h('select', null, childOpts(null));
@@ -618,7 +618,10 @@
         const cid = childSel.value ? Number(childSel.value) : null;
         const r = cid ? await call('assignCardByUid', { uid: uidIn.value, child_id: cid }) : await call('registerCard', { uid: uidIn.value });
         toast(cid ? `Tarjeta ${r.uid} asignada` : 'Tarjeta registrada en inventario: ' + r.uid, 'ok'); render();
-      } catch (e) { regMsg.innerHTML = ''; regMsg.appendChild(h('div', { class: 'result err' }, e.message)); uidIn.select(); }
+      } catch (e) {
+        regMsg.innerHTML = ''; regMsg.appendChild(h('div', { class: 'result err', 'data-no-autorizada': /no autorizada/i.test(e.message) ? '1' : null }, /no autorizada/i.test(e.message) ? '⛔ ' + e.message : e.message)); uidIn.select();
+        if (/no autorizada/i.test(e.message)) beep(false);
+      }
     };
     // Lector USB tipo teclado (125 kHz o NFC): "escribe" el UID en el campo y termina con Enter
     uidIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); register(); } });
@@ -657,8 +660,13 @@
         h('div', { class: 'grid g2' }, field('1. Alumno (opcional: vacío = inventario)', childSel), field('2. Tarjeta (UID)', uidIn)),
         h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: register }, 'Registrar / asignar'), h('span', { class: 'small muted grow' }, 'Pase la tarjeta por el lector USB (125 kHz o NFC) con el cursor en el campo UID, o escriba el número y presione Enter. No se permiten tarjetas repetidas.')),
         regMsg),
+      stock ? h('div', { class: 'card', style: { marginBottom: '20px' } }, h('h2', null, `Tarjetas de Zuki Company para su escuela: ${stock.filter((x) => !x.child_id).length} libres · ${stock.filter((x) => x.child_id).length} asignadas`),
+        h('p', { class: 'small muted' }, 'Solo puede registrar y asignar las tarjetas que Zuki Company entregó a su escuela. Para más tarjetas, solicítelas a Zuki Company.'),
+        stock.filter((x) => !x.child_id).length ? h('div', { class: 'row', style: { flexWrap: 'wrap', gap: '6px' } }, stock.filter((x) => !x.child_id).slice(0, 60).map((x) =>
+          h('button', { class: 'btn sm', title: 'Usar esta tarjeta', onclick: () => { uidIn.value = x.uid; uidIn.focus(); } }, h('code', null, x.uid)))) : h('div', { class: 'small muted' }, 'No tiene tarjetas libres.')) : null,
       h('div', { class: 'card tablewrap' }, respTable([{ label: 'UID' }, { label: 'Estado' }, { label: 'Alumno' }, { label: 'Tutor' }, { label: 'Saldo', right: true }, { label: '', right: true }],
-        cards.map((k) => [h('code', null, k.uid), h('span', null, badge(k.status), k.blocked_by && k.status === 'bloqueada' ? h('div', { class: 'small muted' }, 'por ' + k.blocked_by) : null),
+        cards.map((k) => [h('code', null, k.uid), h('span', null, badge(k.status), k.blocked_by && k.status === 'bloqueada' ? h('div', { class: 'small muted' }, 'por ' + k.blocked_by) : null,
+            ['bloqueada', 'danada'].includes(k.stock_status) ? h('div', null, badge(k.stock_status === 'danada' ? 'dañada (Zuki)' : 'bloqueada por Zuki', 'err')) : null),
           k.child ? k.child.full_name : '—', k.child ? k.child.tutor_name : '—', money(k.balance_cents),
           h('div', { class: 'row acts-wrap', style: { justifyContent: 'flex-end', gap: '6px' } },
             k.status !== 'perdida' ? h('button', { class: 'btn sm', onclick: () => assign(k) }, 'Asignar') : null,
@@ -1875,12 +1883,161 @@
   }
 
   // ======================================================================
+  // ----- Superadministrador: Mis tarjetas (inventario / lista blanca) -----
+  // ======================================================================
+  const STOCK_LABEL = { en_stock: 'En stock', entregada: 'Entregada a escuela', asignada: 'Asignada', bloqueada: 'Bloqueada', danada: 'Dañada' };
+  const STOCK_CLS = { en_stock: 'info', entregada: 'ok', asignada: 'activa', bloqueada: 'bloqueada', danada: 'err' };
+  const stockBadge = (st) => h('span', { class: 'badge ' + (STOCK_CLS[st] || '') }, STOCK_LABEL[st] || st || '—');
+  // Sonido corto al leer una tarjeta (ok = agudo, error = grave)
+  function beep(ok) {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      const ctx = beep.ctx || (beep.ctx = new AC()); const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.frequency.value = ok ? 1200 : 300; o.type = ok ? 'sine' : 'square'; g.gain.value = 0.08;
+      o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + (ok ? 0.09 : 0.25));
+    } catch (_) { /* sin audio */ }
+  }
+  VIEWS.inventario = async (main) => {
+    const [sum, overview] = await Promise.all([superCall('stockSummary'), superCall('overview')]);
+    const schools = overview.schools;
+    const schoolOpts = (first) => [h('option', { value: '' }, first), ...schools.map((x) => h('option', { value: x.id }, x.name))];
+    // --- alta una por una (lector USB 125 kHz tipo teclado) ---
+    const kind = h('select', null, h('option', { value: 'normal' }, 'Normal'), h('option', { value: 'personalizada' }, 'Personalizada'));
+    const batch = h('input', { placeholder: 'p. ej. Lote octubre 2026 (opcional)' });
+    const deliverTo = h('select', null, schoolOpts('— Dejar en stock —'));
+    const uidIn = h('input', { placeholder: 'Pase la tarjeta por el lector o escriba el UID y presione Enter', autocomplete: 'off', 'data-uid-input': '', class: 'grow' });
+    const cont = h('input', { type: 'checkbox', checked: true });
+    const counter = h('b', null, '0'); let sessionN = 0;
+    const feed = h('div', { class: 'small', style: { maxHeight: '160px', overflow: 'auto' } });
+    const feedLine = (ok, text) => { feed.prepend(h('div', { class: 'result ' + (ok ? 'ok' : 'err'), style: { padding: '6px 10px', margin: '4px 0' } }, text)); };
+    const addOne = async () => {
+      const v = uidIn.value.trim(); if (!v) { uidIn.focus(); return; }
+      uidIn.value = '';
+      try {
+        const r = await superCall('stockAdd', { uid: v, kind: kind.value, batch: batch.value || undefined, school_id: deliverTo.value ? Number(deliverTo.value) : undefined });
+        if (r.added) { sessionN++; counter.textContent = String(sessionN); beep(true); feedLine(true, `✔ ${r.added_uids[0]} agregada${deliverTo.value ? ' y entregada' : ''}`); }
+        else { beep(false); feedLine(false, r.duplicates.length ? `⚠ ${r.duplicates[0]} ya estaba en el inventario` : `✖ UID inválido: ${v}`); }
+      } catch (e) { beep(false); feedLine(false, '✖ ' + e.message); }
+      if (cont.checked) uidIn.focus(); else reload();
+    };
+    uidIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addOne(); } });
+    // --- carga en lote (pegar lista o archivo CSV/TXT) ---
+    const bulk = h('textarea', { rows: 5, placeholder: 'Un UID por renglón (o CSV con el UID en la primera columna)\n0001234567\n0001234568' });
+    const file = h('input', { type: 'file', accept: '.csv,.txt,text/csv,text/plain', onchange: async () => { if (file.files[0]) bulk.value = await file.files[0].text(); } });
+    const bulkAdd = async () => {
+      if (!bulk.value.trim()) { toast('Pegue la lista o elija un archivo', 'err'); return; }
+      try {
+        const r = await superCall('stockAdd', { text: bulk.value, kind: kind.value, batch: batch.value || undefined, school_id: deliverTo.value ? Number(deliverTo.value) : undefined });
+        beep(true);
+        modal('Carga en lote', h('div', null, h('p', null, `Agregadas: ${r.added} · Repetidas: ${r.duplicates.length} · Inválidas: ${r.invalid.length}`),
+          r.duplicates.length ? h('p', { class: 'small muted' }, 'Repetidas: ' + r.duplicates.slice(0, 50).join(', ') + (r.duplicates.length > 50 ? '…' : '')) : null,
+          r.invalid.length ? h('p', { class: 'small muted' }, 'Inválidas: ' + r.invalid.slice(0, 50).join(', ')) : null), [{ label: 'Aceptar', class: 'primary' }]);
+        bulk.value = ''; reload();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    // --- filtros y lista ---
+    const q = h('input', { placeholder: 'Buscar UID, lote o nota' });
+    const fSt = h('select', null, h('option', { value: '' }, 'Todos los estados'), Object.entries(STOCK_LABEL).map(([k, l]) => h('option', { value: k }, l)));
+    const fSch = h('select', null, h('option', { value: '' }, 'Todas las escuelas'), h('option', { value: 'none' }, 'Sin escuela'), schools.map((x) => h('option', { value: x.id }, x.name)));
+    const filters = () => ({ q: q.value || undefined, status: fSt.value || undefined, school_id: fSch.value || undefined });
+    const selected = new Set();
+    const listBox = h('div'); const countsBox = h('div');
+    const pickSchool = (title, args) => {
+      const sel = h('select', null, schoolOpts('— Elija escuela —'));
+      const from = h('input', { placeholder: 'UID inicial (p. ej. 0001234500)' }); const to = h('input', { placeholder: 'UID final (p. ej. 0001234599)' });
+      const body = h('div', { class: 'form' }, field('Escuela', sel), args ? h('p', null, `${args.ids.length} tarjeta(s) seleccionada(s).`) : h('div', { class: 'grid g2' }, field('Desde', from), field('Hasta', to)),
+        h('p', { class: 'small muted' }, 'Las tarjetas quedan disponibles para el administrador de esa escuela. Solo esa escuela podrá usarlas.'));
+      modal(title, body, [{ label: 'Cancelar' }, { label: 'Entregar', class: 'primary', onClick: async () => {
+        if (!sel.value) { toast('Elija la escuela', 'err'); return false; }
+        try {
+          const r = await superCall('stockDeliver', { school_id: Number(sel.value), ...(args || { from: from.value, to: to.value }) });
+          toast(`${r.delivered} tarjeta(s) entregada(s) a ${r.school}` + (r.skipped.length ? ` · ${r.skipped.length} omitida(s)` : ''), r.delivered ? 'ok' : 'err');
+          selected.clear(); reload();
+        } catch (e) { toast(e.message, 'err'); return false; }
+      } }]);
+    };
+    const bulkStatus = async (status, ids) => {
+      const lbl = { bloqueada: 'bloquear', danada: 'marcar como dañadas', desbloquear: 'desbloquear', en_stock: 'regresar a stock' }[status];
+      if (!(await confirmBox('Inventario', `¿${lbl[0].toUpperCase() + lbl.slice(1)} ${ids.length} tarjeta(s)?`))) return;
+      const r = await safe(() => superCall('stockSetStatus', { ids, status }));
+      if (r) { toast(`${r.updated} actualizada(s)` + (r.skipped.length ? ` · ${r.skipped.length} omitida(s): ${r.skipped[0].motivo}` : ''), 'ok'); selected.clear(); reload(); }
+    };
+    const removeCards = async (ids) => {
+      if (!(await confirmBox('Eliminar del inventario', `¿Eliminar ${ids.length} tarjeta(s) del inventario? Las que ya registró una escuela no se eliminan (bloquéelas).`))) return;
+      const r = await safe(() => superCall('stockRemove', { ids }));
+      if (r) { toast(`${r.removed} eliminada(s)` + (r.skipped.length ? ` · ${r.skipped.length} omitida(s)` : ''), 'ok'); selected.clear(); reload(); }
+    };
+    const editCard = (c) => {
+      const k = h('select', null, ['normal', 'personalizada'].map((x) => h('option', { value: x, selected: c.kind === x }, x === 'normal' ? 'Normal' : 'Personalizada')));
+      const b = h('input', { value: c.batch || '' }); const n = h('input', { value: c.note || '' });
+      modal('Tarjeta ' + c.uid, h('div', { class: 'form' }, field('Tipo', k), field('Lote', b), field('Nota', n)), [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
+        try { await superCall('stockUpdate', { id: c.id, kind: k.value, batch: b.value, note: n.value }); toast('Guardado', 'ok'); reload(); } catch (e) { toast(e.message, 'err'); return false; }
+      } }]);
+    };
+    const selBar = h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap', margin: '0 0 10px' } });
+    const drawSelBar = () => {
+      selBar.innerHTML = '';
+      const ids = [...selected];
+      selBar.append(h('span', { class: 'small muted grow' }, ids.length ? `${ids.length} seleccionada(s)` : 'Seleccione tarjetas con la casilla para entregarlas o bloquearlas en lote.'),
+        h('button', { class: 'btn sm primary', disabled: !ids.length, onclick: () => pickSchool('Entregar a escuela', { ids }) }, '🏫 Entregar a escuela'),
+        h('button', { class: 'btn sm', disabled: !ids.length, onclick: () => bulkStatus('bloqueada', ids) }, '⛔ Bloquear'),
+        h('button', { class: 'btn sm', disabled: !ids.length, onclick: () => bulkStatus('danada', ids) }, 'Dañada'),
+        h('button', { class: 'btn sm', disabled: !ids.length, onclick: () => bulkStatus('desbloquear', ids) }, 'Desbloquear'),
+        h('button', { class: 'btn sm danger', disabled: !ids.length, onclick: () => removeCards(ids) }, 'Eliminar'));
+    };
+    const reload = async () => {
+      const [rows, s2] = await Promise.all([superCall('stockList', filters()), superCall('stockSummary')]);
+      countsBox.innerHTML = '';
+      countsBox.append(h('div', { class: 'grid g3 stats' }, statCard('Total', String(s2.total), 'Tarjetas en el inventario'),
+        ...Object.keys(STOCK_LABEL).map((k) => statCard(STOCK_LABEL[k], String(s2.by_status[k] || 0)))),
+        s2.migrated ? h('p', { class: 'small muted' }, `${s2.migrated} tarjeta(s) que ya usaban las escuelas se agregaron automáticamente al actualizar.`) : null,
+        h('div', { class: 'card tablewrap', style: { margin: '14px 0' } }, h('h2', null, 'Por escuela'), respTable([{ label: 'Escuela' }, { label: 'Entregadas (libres)', right: true }, { label: 'Asignadas', right: true }, { label: 'Bloqueadas / dañadas', right: true }, { label: 'Total', right: true }],
+          s2.schools.map((x) => [x.name, String(x.entregada || 0), String(x.asignada || 0), String((x.bloqueada || 0) + (x.danada || 0)), h('b', null, String(x.total || 0))]), null, 'resp-md')));
+      listBox.innerHTML = '';
+      for (const id of [...selected]) if (!rows.some((r) => r.id === id)) selected.delete(id);
+      drawSelBar();
+      const all = h('input', { type: 'checkbox', checked: rows.length > 0 && rows.every((r) => selected.has(r.id)), onchange: () => { rows.forEach((r) => (all.checked ? selected.add(r.id) : selected.delete(r.id))); reload(); } });
+      listBox.append(rows.length ? h('table', { class: 'resp resp-md' }, h('tr', { class: 'head' }, h('th', null, all), ['UID', 'Tipo', 'Estado', 'Escuela', 'Alumno', 'Alta', 'Lote / nota', ''].map((x) => h('th', null, x))),
+        rows.map((c) => {
+          const cb = h('input', { type: 'checkbox', checked: selected.has(c.id), onchange: () => { if (cb.checked) selected.add(c.id); else selected.delete(c.id); drawSelBar(); } });
+          return h('tr', null, h('td', null, cb), h('td', { 'data-label': 'UID' }, h('code', null, c.uid)), h('td', { 'data-label': 'Tipo' }, c.kind === 'personalizada' ? 'Personalizada' : 'Normal'),
+            h('td', { 'data-label': 'Estado' }, stockBadge(c.status)), h('td', { 'data-label': 'Escuela' }, c.school_name || h('span', { class: 'muted' }, '—')),
+            h('td', { 'data-label': 'Alumno' }, c.child_name || '—'), h('td', { 'data-label': 'Alta', class: 'small' }, fmtDate(c.created_at)),
+            h('td', { 'data-label': 'Lote / nota', class: 'small' }, [c.batch, c.note].filter(Boolean).join(' · ') || '—'),
+            h('td', { class: 'right', style: { whiteSpace: 'nowrap' } }, h('button', { class: 'btn sm', onclick: () => editCard(c) }, 'Editar'), ' ',
+              ['bloqueada', 'danada'].includes(c.status) ? h('button', { class: 'btn sm', onclick: () => bulkStatus('desbloquear', [c.id]) }, 'Desbloquear') : h('button', { class: 'btn sm', onclick: () => bulkStatus('bloqueada', [c.id]) }, 'Bloquear'), ' ',
+              !c.card_id ? h('button', { class: 'btn sm danger', onclick: () => removeCards([c.id]) }, 'Eliminar') : null));
+        })) : h('div', { class: 'empty' }, 'No hay tarjetas con esos filtros'), h('p', { class: 'small muted' }, `${rows.length} tarjeta(s) mostradas`));
+    };
+    for (const el of [fSt, fSch]) el.addEventListener('change', reload);
+    let qt; q.addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(reload, 250); });
+    const exportCsv = async () => {
+      const r = await safe(() => superCall('stockExport', filters()));
+      if (r) downloadBlob(new Blob(['\ufeff' + r.csv], { type: 'text/csv;charset=utf-8' }), r.filename);
+    };
+    put(main, pageHead('Mis tarjetas (inventario)', 'Solo las tarjetas de este inventario, entregadas a una escuela, se pueden asignar, cobrar o recargar en esa escuela.',
+      h('button', { class: 'btn', onclick: () => pickSchool('Entregar un rango a escuela') }, '🏫 Entregar rango'), h('button', { class: 'btn', onclick: exportCsv }, '⬇ Exportar CSV')),
+      h('div', { class: 'grid g2' },
+        h('div', { class: 'card form' }, h('h2', null, 'Registrar tarjetas una por una'),
+          field('Tarjeta (UID)', uidIn, 'Lector USB 125 kHz o NFC: con el cursor aquí, acerque la tarjeta; se agrega sola al leerla (Enter).'),
+          h('label', { class: 'check' }, cont, 'Modo continuo (seguir leyendo una tras otra)'),
+          h('div', { class: 'row' }, h('span', { class: 'grow' }, 'Leídas en esta sesión: ', counter), h('button', { class: 'btn primary', onclick: addOne }, 'Agregar')), feed),
+        h('div', { class: 'card form' }, h('h2', null, 'Carga en lote'), field('Pegar lista de UID', bulk), field('o subir archivo CSV / TXT', file),
+          h('div', { class: 'row' }, h('span', { class: 'grow small muted' }, 'Se normaliza: sin espacios ni separadores, en mayúsculas; los ceros a la izquierda se conservan.'), h('button', { class: 'btn primary', onclick: bulkAdd }, 'Agregar lista')))),
+      h('div', { class: 'card form', style: { margin: '14px 0' } }, h('div', { class: 'grid g3' }, field('Tipo', kind), field('Lote / nota', batch), field('Entregar al dar de alta a', deliverTo))),
+      countsBox,
+      h('div', { class: 'card tablewrap' }, h('h2', null, 'Tarjetas'), h('div', { class: 'filters row', style: { gap: '8px', flexWrap: 'wrap', marginBottom: '10px' } }, q, fSt, fSch), selBar, listBox));
+    await reload();
+    setTimeout(() => uidIn.focus(), 50);
+  };
+
+  // ======================================================================
   // ----- Superadministrador: Alertas -----
   // ======================================================================
   const ALERT_LABEL = { recarga_grande: 'Recarga grande', muchas_recargas: 'Muchas recargas seguidas del mismo usuario', recargas_repetidas: 'Varias recargas a la misma tarjeta',
     fuera_de_horario: 'Recarga fuera de horario', auto_recarga: 'Posible auto-recarga (padre/alumno)', limite_diario: 'Límite diario superado', borrado: 'Borrado',
     intentos_fallidos: 'Intentos de acceso fallidos', cuenta_bloqueada: 'Cuenta bloqueada por intentos', alerta_roja: 'Alerta roja', superadmin_recuperado: 'Recuperación de superadmin',
-    mensualidad_por_vencer: 'Mensualidad por vencer', mensualidad_tolerancia: 'Mensualidad vencida (tolerancia)', mensualidad_pausada: 'Escuela pausada' };
+    tarjeta_no_autorizada: 'Tarjeta no autorizada', mensualidad_por_vencer: 'Mensualidad por vencer', mensualidad_tolerancia: 'Mensualidad vencida (tolerancia)', mensualidad_pausada: 'Escuela pausada' };
   const SEV_LABEL = { critica: 'Crítica', alta: 'Alta', media: 'Media', aviso: 'Aviso', info: 'Info', baja: 'Baja' };
   const sevBadge = (s) => h('span', { class: 'badge ' + (s || 'info') }, SEV_LABEL[s] || s || 'Info');
   VIEWS.alertas = async (main) => {

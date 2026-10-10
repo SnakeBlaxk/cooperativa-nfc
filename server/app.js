@@ -39,7 +39,7 @@ async function createServer(opts = {}) {
     seedMinimal(db, { username: username || 'admin', password, schoolName: opts.bootstrapSchoolName || 'Mi escuela' });
     console.log('[auth] Escuela y administrador inicial creados:', username || 'admin');
   }
-  const svc = createService(db);
+  const svc = createService(db, { cardStock: opts.cardStock !== false && process.env.CARD_STOCK_ENFORCE !== '0' });
   const api = createApi(svc);
   let secret = opts.jwtSecret || process.env.JWT_SECRET;
   if (!secret) {
@@ -83,7 +83,7 @@ async function createServer(opts = {}) {
     next();
   });
 
-  const STATUS = { BLOQUEADO_SEGURIDAD: 423, SISTEMA_BLOQUEADO: 403, OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, ESCUELA_PAUSADA: 403, VERSION_OBSOLETA: 410, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, LIMITE_INTENTOS: 429, INTERNO: 500 };
+  const STATUS = { BLOQUEADO_SEGURIDAD: 423, SISTEMA_BLOQUEADO: 403, OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, ESCUELA_PAUSADA: 403, VERSION_OBSOLETA: 410, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, TARJETA_NO_AUTORIZADA: 403, LIMITE_INTENTOS: 429, INTERNO: 500 };
   const send = (res, fn) => {
     Promise.resolve().then(fn).then((data) => res.json({ ok: true, data })).catch((e) => {
       const code = e.code || 'INTERNO';

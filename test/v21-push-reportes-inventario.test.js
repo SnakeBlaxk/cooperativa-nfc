@@ -25,7 +25,7 @@ const sub = (n) => ({ endpoint: 'https://push.example.com/send/' + n, keys: { p2
 const flush = () => S.push.idle();
 
 before(async () => {
-  S = await createServer({ jwtSecret: 'v'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0, pushSender: sender, env: {} });
+  S = await createServer({ cardStock: false, jwtSecret: 'v'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0, pushSender: sender, env: {} });
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;
   [A, C, M, J] = [await tok('admin', 'admin123'), await tok('cajero', 'cajero123'), await tok('maria', 'tutor123'), await tok('juan', 'tutor123')];

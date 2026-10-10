@@ -6,6 +6,7 @@ const { DEFAULT_CATEGORIES } = require('./seed');
 const crypto = require('crypto');
 
 const { STATUSES, isYmd } = require('./billing');
+const { createCardStock } = require('./card-stock');
 function tempPassword() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   const b = crypto.randomBytes(10); let s = '';
@@ -192,12 +193,14 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
   // Acciones del panel que quedan en la bitácora
   const AUDITED = { createSchool: 'escuela_creada', updateSchool: 'escuela_editada', createStaff: 'usuario_creado', resetStaffPassword: 'contrasena_asignada', setStaffActive: 'cuenta_activada', revokeDevice: 'caja_revocada', setPrimaryDevice: 'caja_principal', generateInvitations: 'codigos_generados' };
   const SEC = security ? security.methods : {};
-  const BILL = billing ? billing.methods : {}; // mensualidad (registran su propia bitácora)
+  const BILL = billing ? billing.methods : {};
+  const STOCK = createCardStock(db, { security, now }).methods; // inventario de tarjetas (bitácora propia) // mensualidad (registran su propia bitácora)
   function handle(user, method, args, ctx = {}) {
     need(user);
     const a = args && typeof args === 'object' ? args : {};
     if (Object.prototype.hasOwnProperty.call(SEC, method)) return SEC[method](user, a, ctx);
     if (Object.prototype.hasOwnProperty.call(BILL, method)) return BILL[method](user, a, ctx);
+    if (Object.prototype.hasOwnProperty.call(STOCK, method)) return STOCK[method](user, a, ctx);
     const fn = Object.prototype.hasOwnProperty.call(M, method) ? M[method] : null;
     if (!fn) throw new AppError('Operación desconocida', 'NO_ENCONTRADO');
     const out = fn(user, a);
@@ -210,7 +213,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
     }
     return out;
   }
-  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: [...Object.keys(M), ...Object.keys(SEC), ...Object.keys(BILL)] };
+  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: [...Object.keys(M), ...Object.keys(SEC), ...Object.keys(BILL), ...Object.keys(STOCK)] };
 }
 
 module.exports = { createPlatform, tempPassword };

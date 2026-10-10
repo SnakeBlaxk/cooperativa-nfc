@@ -9,7 +9,7 @@ const { normalizeServerUrl, resolveServerUrl, checkServer, isAllowedUrl, DEFAULT
 
 let S, srv, base;
 before(async () => {
-  S = await createServer({ jwtSecret: 'o'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0 });
+  S = await createServer({ cardStock: false, jwtSecret: 'o'.repeat(40), mailer: consoleMailer(() => {}), billingSweepMs: 0 });
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;
 });

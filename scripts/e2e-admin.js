@@ -64,6 +64,8 @@ app.whenReady().then(async () => {
       await nav('alumnos'); await sleep(600);
       kidId = S.svc.createChild(S.svc.login('admin', 'admin123'), { full_name: 'Mateo Ramírez', grade: '2° B' }).id;
     }
+    // La tarjeta debe estar en el inventario de Zuki Company y entregada a la escuela (lista blanca)
+    S.db.run("INSERT OR IGNORE INTO card_stock (uid, status, school_id, delivered_at, created_at) VALUES ('0A0B0C0D0E', 'entregada', (SELECT school_id FROM users WHERE username = 'admin'), datetime('now','localtime'), datetime('now','localtime'))");
     await nav('alumnos'); await sleep(800);
     await expect('Asignar tarjeta', 'botón asignar en alumnos');
     await js(`[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Asignar tarjeta')).click()`); await sleep(900);

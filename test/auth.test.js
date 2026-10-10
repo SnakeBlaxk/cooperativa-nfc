@@ -11,7 +11,7 @@ const { remoteLogin } = require('../src/main/remote-auth');
 let server, base, mailer, ctx;
 before(async () => {
   mailer = consoleMailer(() => {}); // silencioso
-  ctx = await createServer({ jwtSecret: 'x'.repeat(40), mailer, appUrl: 'http://test' });
+  ctx = await createServer({ cardStock: false, jwtSecret: 'x'.repeat(40), mailer, appUrl: 'http://test' });
   await new Promise((r) => { server = ctx.app.listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
 });

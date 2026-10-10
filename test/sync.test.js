@@ -26,7 +26,7 @@ async function serverToken(identifier, password) {
 
 beforeEach(async () => {
   // Servidor vacío (como en producción) con admin inicial
-  S = await createServer({ jwtSecret: 's'.repeat(40), mailer: consoleMailer(() => {}), seed: false, bootstrapAdmin: ADMIN, legacySync: true }); // modo temporal LEGACY_SYNC=1 (cajas viejas)
+  S = await createServer({ cardStock: false, jwtSecret: 's'.repeat(40), mailer: consoleMailer(() => {}), seed: false, bootstrapAdmin: ADMIN, legacySync: true }); // modo temporal LEGACY_SYNC=1 (cajas viejas)
   S.db.run('UPDATE users SET must_change_password = 0');
   await new Promise((r) => { srv = S.app.listen(0, r); });
   base = `http://127.0.0.1:${srv.address().port}`;

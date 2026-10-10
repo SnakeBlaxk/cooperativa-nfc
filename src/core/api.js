@@ -24,6 +24,7 @@ function createApi(svc) {
     updateProduct: (u, a) => svc.updateProduct(u, a.id, a),
     deleteProduct: (u, a) => svc.deleteProduct(u, a.id),
     listCards: (u) => svc.listCards(u),
+    listSchoolStock: (u) => svc.listSchoolStock(u),
     registerCard: (u, a) => svc.registerCard(u, a),
     assignCard: (u, a) => svc.assignCard(u, a.card_id, a.child_id),
     assignCardByUid: (u, a) => svc.assignCardByUid(u, a),
