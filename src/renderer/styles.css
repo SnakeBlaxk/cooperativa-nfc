@@ -1,8 +1,8 @@
-/* Cooperativa NFC — diseño v2: limpio, espacioso, letras y botones grandes, colores consistentes. */
+/* Zuki Pay — diseño v2.1: paleta navy + menta/cian, limpio, letras y botones grandes, alto contraste. */
 :root {
-  --bg: #f2f4f8; --card: #fff; --text: #1b2433; --muted: #5d6779; --primary: #1d5fd1; --primary-d: #164aa6; --primary-bg: #e8f0fe;
+  --bg: #f4f6f9; --card: #fff; --text: #0b1230; --muted: #5d6779; --primary: #0b7f86; --primary-d: #08646a; --primary-bg: #e3f8f4;
   --ok: #138a3e; --ok-bg: #e5f6ea; --err: #c62828; --err-bg: #fdecea; --warn: #b45309; --warn-bg: #fff3dc;
-  --border: #dde2ea; --side: #15233d; --side-text: #d3dbea; --radius: 16px; --shadow: 0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04);
+  --border: #dde2ea; --side: #0b1230; --side-text: #d3dbea; --radius: 16px; --shadow: 0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); font-size: 17px; line-height: 1.45; }
@@ -17,7 +17,7 @@ a { color: var(--primary); }
 /* botones */
 .btn { border: 1.5px solid var(--border); background: #fff; padding: 10px 18px; min-height: 46px; border-radius: 12px; cursor: pointer; color: var(--text); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
 .btn:hover { background: #f1f4f9; border-color: #c8d0dc; } .btn:disabled { opacity: .45; cursor: not-allowed; }
-.btn:focus-visible, .nav a:focus-visible { outline: 3px solid #9cc0ff; outline-offset: 2px; }
+.btn:focus-visible, .nav a:focus-visible { outline: 3px solid #1ec8f0; outline-offset: 2px; }
 .btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); } .btn.primary:hover { background: var(--primary-d); }
 .btn.danger { background: var(--err); color: #fff; border-color: var(--err); } .btn.danger:hover { background: #a61f1f; }
 .btn.ok { background: var(--ok); color: #fff; border-color: var(--ok); } .btn.ok:hover { background: #0f6f32; }
@@ -29,7 +29,7 @@ a { color: var(--primary); }
 input, select, textarea { border: 1.5px solid #cfd6e2; border-radius: 12px; padding: 11px 14px; background: #fff; min-width: 0; min-height: 48px; color: var(--text); }
 textarea { min-height: 80px; }
 input[type=checkbox], input[type=radio] { min-height: 0; width: 22px; height: 22px; accent-color: var(--primary); flex: none; }
-input:focus, select:focus, textarea:focus { outline: 3px solid #bcd3fb; border-color: var(--primary); }
+input:focus, select:focus, textarea:focus { outline: 3px solid #9de9de; border-color: var(--primary); }
 label { display: flex; flex-direction: column; gap: 6px; font-size: .95rem; color: var(--muted); font-weight: 600; }
 label.check { flex-direction: row; align-items: center; gap: 12px; color: var(--text); font-weight: 500; cursor: pointer; }
 .form { display: grid; gap: 16px; }
@@ -67,10 +67,10 @@ tr:hover td { background: #fafbfd; } td .btn + .btn { margin-left: 6px; }
 .banner { border-radius: 14px; padding: 16px 20px; margin-bottom: 20px; font-weight: 600; display: flex; gap: 14px; align-items: center; font-size: 1.02rem; border: 1.5px solid; }
 .banner .ico { font-size: 1.6rem; }
 .banner.err { background: var(--err-bg); color: #8f1d1d; border-color: #f2b8b5; } .banner.warn { background: var(--warn-bg); color: #7a3d06; border-color: #f5d29a; }
-.banner.ok { background: var(--ok-bg); color: #0d5c2a; border-color: #a7dcb7; } .banner.info { background: var(--primary-bg); color: #163f8a; border-color: #b9cff7; }
+.banner.ok { background: var(--ok-bg); color: #0d5c2a; border-color: #a7dcb7; } .banner.info { background: var(--primary-bg); color: #0b5f64; border-color: #a8e6dc; }
 .banner.red { background: #b71c1c; color: #fff; border-color: #7f1010; }
 /* inicio de sesión */
-.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 20% 10%, #2a63c9 0, #15233d 60%); padding: 24px; }
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 20% 10%, #0b7f86 0, #0b1230 60%); padding: 24px; }
 .login { width: 440px; max-width: 100%; padding: 36px 34px; border-radius: 22px; }
 .login h1 { text-align: center; font-size: 1.8rem; margin-bottom: 2px; } .login .logo { font-size: 54px; text-align: center; line-height: 1; margin-bottom: 8px; }
 .login .tag { text-align: center; color: var(--muted); margin: 0 0 8px; }
@@ -86,12 +86,12 @@ tr:hover td { background: #fafbfd; } td .btn + .btn { margin-left: 6px; }
 .pos .left { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .uidbox { display: flex; gap: 10px; } .uidbox input { flex: 1; font-size: 1.25rem; min-height: 58px; letter-spacing: .04em; }
 .cardinfo { display: flex; gap: 18px; align-items: center; min-height: 92px; }
-.avatar { width: 68px; height: 68px; border-radius: 50%; background: #dfe7f6; display: flex; align-items: center; justify-content: center; font-size: 28px; overflow: hidden; flex: none; }
+.avatar { width: 68px; height: 68px; border-radius: 50%; background: #d5efe9; display: flex; align-items: center; justify-content: center; font-size: 28px; overflow: hidden; flex: none; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
 .products { overflow: auto; flex: 1; } .catname { margin: 16px 0 8px; font-weight: 800; color: var(--muted); font-size: .9rem; text-transform: uppercase; letter-spacing: .05em; }
 .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 10px; }
 .pbtn { border: 1.5px solid var(--border); background: #fff; border-radius: 14px; padding: 14px; text-align: left; cursor: pointer; min-height: 86px; font-size: 1.02rem; }
-.pbtn:hover { border-color: var(--primary); background: #f4f8ff; } .pbtn b { display: block; margin-bottom: 4px; } .pbtn span { color: var(--primary); font-weight: 800; font-size: 1.1rem; }
+.pbtn:hover { border-color: var(--primary); background: #f1fbf9; } .pbtn b { display: block; margin-bottom: 4px; } .pbtn span { color: var(--primary); font-weight: 800; font-size: 1.1rem; }
 .pbtn.forbidden { border-color: #f0b4b1; background: var(--err-bg); } .pbtn.forbidden span { color: var(--err); }
 .cart { display: flex; flex-direction: column; min-height: 0; } .cart .items { flex: 1; overflow: auto; }
 .cline { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
@@ -105,7 +105,7 @@ tr:hover td { background: #fafbfd; } td .btn + .btn { margin-left: 6px; }
 .modal h2 { font-size: 1.4rem; }
 .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; flex-wrap: wrap; }
 #toast { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 99; }
-.toast { background: #15233d; color: #fff; padding: 14px 20px; border-radius: 12px; max-width: 460px; box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: 1rem; font-weight: 500; }
+.toast { background: #0b1230; color: #fff; padding: 14px 20px; border-radius: 12px; max-width: 460px; box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: 1rem; font-weight: 500; }
 .toast.err { background: var(--err); } .toast.ok { background: var(--ok); }
 /* padres */
 .kid { display: flex; gap: 18px; align-items: center; cursor: pointer; } .kid:hover { border-color: var(--primary); box-shadow: 0 4px 14px rgba(29,95,209,.12); }
@@ -208,7 +208,7 @@ code { font-family: Consolas, "Courier New", monospace; background: #f1f4f9; pad
   table.resp-md .acts-wrap { flex-wrap: wrap; justify-content: flex-start !important; }
 }
 @media (max-width: 640px) { table.resp-md tr { grid-template-columns: 1fr; } }
-tr.unread td { background: #f3f7ff; } .cr-table td { vertical-align: top; } input[data-readonly] { background: #f4f5f7; color: var(--text, #222); cursor: not-allowed; }
+tr.unread td { background: #f1fbf9; } .cr-table td { vertical-align: top; } input[data-readonly] { background: #f4f5f7; color: var(--text, #222); cursor: not-allowed; }
 /* v2.1: inventario, avisos y reportes */
 .count-pill { margin-left: 6px; background: var(--warn); color: #fff; border-radius: 99px; font-size: .8rem; padding: 1px 8px; font-weight: 700; }
 tr.low td { background: #fffaf0; }
@@ -216,3 +216,13 @@ tr.low td { background: #fffaf0; }
 .notice { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fafbfd; }
 .notice.unread { background: var(--warn-bg); border-color: #f5d29a; }
 .push-card .check { font-weight: 500; }
+/* Zuki Pay — acentos */
+:root { --mint: #5cffc8; --cyan: #1ec8f0; --navy: #0b1230; --navy-2: #16224a; }
+.side { background: linear-gradient(180deg, var(--navy-2), var(--navy)); }
+.brand img.brand-logo { width: 200px; height: auto; display: block; margin-bottom: 4px; }
+.login .logo img { width: 280px; max-width: 100%; height: auto; }
+.btn.primary { background: linear-gradient(135deg, var(--mint), var(--cyan)); color: var(--navy); border-color: #2fd9d0; font-weight: 700; }
+.btn.primary:hover { background: linear-gradient(135deg, #46f0b8, #12b3db); color: var(--navy); }
+.nav a.active { background: linear-gradient(135deg, var(--mint), var(--cyan)); color: var(--navy); }
+.nav a.active .ico { filter: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

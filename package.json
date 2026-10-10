@@ -1,8 +1,8 @@
 {
   "name": "cooperativa-nfc",
-  "productName": "Cooperativa NFC",
-  "version": "2.0.0",
-  "description": "Sistema de cooperativa escolar con tarjetas NFC (solo en línea) - Zuki Company",
+  "productName": "Zuki Pay",
+  "version": "2.1.0",
+  "description": "Zuki Pay: tiendita escolar con tarjetas NFC (solo en línea) - Zuki Company",
   "author": "Zuki Company <contacto@zuki.example>",
   "license": "UNLICENSED",
   "main": "src/main/main.js",
@@ -21,7 +21,8 @@
     "e2e:solicitudes": "electron scripts/e2e-solicitudes.js",
     "e2e:v21": "electron scripts/e2e-v21.js",
     "e2e:tarjetas": "electron scripts/e2e-tarjetas.js",
-    "e2e:bajas": "electron scripts/e2e-bajas.js"
+    "e2e:bajas": "electron scripts/e2e-bajas.js",
+    "e2e:zukipay": "electron scripts/e2e-zukipay.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -36,7 +37,7 @@
   },
   "build": {
     "appId": "mx.zuki.cooperativanfc",
-    "productName": "Cooperativa NFC",
+    "productName": "Zuki Pay",
     "copyright": "© 2026 Zuki Company",
     "directories": {
       "output": "dist",
@@ -58,7 +59,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "CooperativaNFC-Setup-${version}.${ext}"
+      "artifactName": "ZukiPay-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -66,7 +67,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Cooperativa NFC",
+      "shortcutName": "Zuki Pay",
       "language": "2058",
       "installerLanguages": [
         "es_ES"
@@ -92,12 +93,12 @@
       ],
       "category": "public.app-category.business",
       "icon": "build/icon.png",
-      "artifactName": "CooperativaNFC-${version}-${arch}.${ext}",
+      "artifactName": "ZukiPay-${version}-${arch}.${ext}",
       "hardenedRuntime": true,
       "gatekeeperAssess": false
     },
     "dmg": {
-      "title": "Cooperativa NFC ${version}"
+      "title": "Zuki Pay ${version}"
     },
     "linux": {
       "target": [
@@ -110,7 +111,7 @@
       ],
       "category": "Office",
       "icon": "build/icon.png",
-      "artifactName": "CooperativaNFC-${version}-${arch}.${ext}"
+      "artifactName": "ZukiPay-${version}-${arch}.${ext}"
     }
   },
   "engines": {

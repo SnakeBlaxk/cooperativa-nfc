@@ -64,7 +64,7 @@ async function connect() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 820, minWidth: 1000, minHeight: 650,
-    title: 'Cooperativa NFC',
+    title: 'Zuki Pay',
     backgroundColor: '#f4f6fb',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
@@ -125,9 +125,13 @@ const template = [
   { label: 'Editar', submenu: [{ role: 'undo', label: 'Deshacer' }, { role: 'redo', label: 'Rehacer' }, { type: 'separator' }, { role: 'cut', label: 'Cortar' }, { role: 'copy', label: 'Copiar' }, { role: 'paste', label: 'Pegar' }, { role: 'selectAll', label: 'Seleccionar todo' }] },
   { label: 'Ver', submenu: [{ label: 'Recargar', accelerator: 'CmdOrCtrl+R', click: () => { configuring = false; connect(); } }, { role: 'toggleDevTools', label: 'Herramientas de desarrollo' }, { type: 'separator' }, { role: 'resetZoom', label: 'Tamaño normal' }, { role: 'zoomIn', label: 'Acercar' }, { role: 'zoomOut', label: 'Alejar' }, { role: 'togglefullscreen', label: 'Pantalla completa' }] },
 ];
-if (process.platform === 'darwin') template.unshift({ label: 'Cooperativa NFC', submenu: [{ role: 'about', label: 'Acerca de' }, { role: 'hide', label: 'Ocultar' }, { role: 'quit', label: 'Salir' }] });
+if (process.platform === 'darwin') template.unshift({ label: 'Zuki Pay', submenu: [{ role: 'about', label: 'Acerca de' }, { role: 'hide', label: 'Ocultar' }, { role: 'quit', label: 'Salir' }] });
 
 if (process.env.COOP_USER_DATA) app.setPath('userData', process.env.COOP_USER_DATA); // pruebas
+else { // v2.1: el producto se llama Zuki Pay; conservar la configuración de 'Cooperativa NFC' si existe
+  try { const fs = require('fs'); const nuevo = path.join(app.getPath('userData'), 'config.json'); const viejo = path.join(app.getPath('appData'), 'Cooperativa NFC', 'config.json');
+    if (!fs.existsSync(nuevo) && fs.existsSync(viejo)) { fs.mkdirSync(path.dirname(nuevo), { recursive: true }); fs.copyFileSync(viejo, nuevo); } } catch (_) {}
+}
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {

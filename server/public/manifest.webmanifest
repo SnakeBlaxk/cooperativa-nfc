@@ -1,14 +1,14 @@
 {
-  "name": "Cooperativa NFC",
-  "short_name": "Cooperativa",
+  "name": "Zuki Pay",
+  "short_name": "Zuki Pay",
   "description": "Saldo, historial y límites de la tarjeta de la cooperativa escolar",
   "lang": "es-MX",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f4f6fb",
-  "theme_color": "#2f6fec",
+  "background_color": "#0B1230",
+  "theme_color": "#16224A",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

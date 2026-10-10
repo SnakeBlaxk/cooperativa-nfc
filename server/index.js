@@ -40,7 +40,7 @@ const { openDatabase } = require('../src/core/db');
   if (replicator) await replicator.flush(); // primera copia (incluye lo creado al arrancar)
   if (mode === 'disco') dailyFileBackups(db, process.env.BACKUP_DIR || path.join(path.dirname(dbPath), 'respaldos'));
   const port = Number(process.env.PORT || 3000);
-  const server = app.listen(port, () => console.log(`Servidor Cooperativa NFC en http://localhost:${port}  (base: ${dbPath}, persistencia: ${mode})`));
+  const server = app.listen(port, () => console.log(`Servidor Zuki Pay en http://localhost:${port}  (base: ${dbPath}, persistencia: ${mode})`));
   // Al apagar (Render envía SIGTERM al reiniciar o dormir) se sube la última copia
   let closing = false;
   const shutdown = async (sig) => {

@@ -195,7 +195,7 @@ function createAuth(db, svc, opts = {}) {
     db.run('INSERT INTO password_resets (user_id, token_hash, expires_at, created_at) VALUES (?,?,?,?)', [u.id, sha256(token), nowMs() + resetTtlMs, ts()]);
     const to = u.email || u.phone || u.username;
     await mailer.send({
-      to, channel: u.email ? 'email' : (u.phone ? 'sms' : 'console'), subject: 'Restablecer contraseña — Cooperativa NFC',
+      to, channel: u.email ? 'email' : (u.phone ? 'sms' : 'console'), subject: 'Restablecer contraseña — Zuki Pay',
       text: `Hola ${u.full_name}. Para restablecer tu contraseña abre este enlace (válido 1 hora):\n${appUrl}/?reset=${token}\nSi no lo solicitaste, ignora este mensaje.`,
       token, userId: u.id,
     });
@@ -223,7 +223,7 @@ function createAuth(db, svc, opts = {}) {
     if (Array.isArray(data.child_ids)) {
       for (const cid of data.child_ids) { svc.updateChild(actor, cid, { tutor_id: u.id }); onChildLinked(Number(cid)); }
     }
-    await mailer.send({ to: u.email || u.phone, channel: u.email ? 'email' : 'sms', subject: 'Tu cuenta de la Cooperativa NFC',
+    await mailer.send({ to: u.email || u.phone, channel: u.email ? 'email' : 'sms', subject: 'Tu cuenta de Zuki Pay',
       text: `Hola ${u.full_name}. Tu usuario es ${u.username} y tu contraseña temporal es ${password}. Entra en ${appUrl}. Guárdala en un lugar seguro; si la olvidas, pide una nueva a la escuela.` });
     return { user: u, temporary_password: password };
   }

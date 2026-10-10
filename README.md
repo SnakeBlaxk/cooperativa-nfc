@@ -1,4 +1,4 @@
-# Cooperativa NFC — Tiendita escolar con tarjetas NFC
+# Zuki Pay — Tiendita escolar con tarjetas NFC
 
 Sistema para la cooperativa escolar de **Zuki Company (Morelia, Michoacán)**. Cada alumno tiene una tarjeta NFC; los padres/tutores recargan saldo en la cooperativa, los niños pagan con la tarjeta y **cada movimiento queda registrado** (incluidos los intentos rechazados). Montos en **pesos mexicanos (MXN)**, guardados internamente en centavos (enteros).
 
@@ -96,20 +96,20 @@ Cada escuela tiene un **estado** y un **periodo pagado** (*fecha inicio* y *fech
 ## 2. Instalación para usuarios finales
 
 ### Windows 10/11
-1. Descargue `CooperativaNFC-Setup-2.0.0.exe`.
+1. Descargue `ZukiPay-Setup-2.1.0.exe`.
 2. Ábralo. Como el instalador **no está firmado** con certificado de código, Windows SmartScreen puede mostrar *“Windows protegió su PC”*: haga clic en **Más información → Ejecutar de todas formas**.
 3. Elija la carpeta de instalación y termine. Se crean accesos en el Escritorio y en el menú Inicio.
-4. La caja **no guarda datos en la computadora**: todo está en el servidor. Solo guarda la dirección del servidor en `%APPDATA%\Cooperativa NFC\config.json`.
+4. La caja **no guarda datos en la computadora**: todo está en el servidor. Solo guarda la dirección del servidor en `%APPDATA%\Zuki Pay\config.json`. (si existía la configuración de la versión anterior en `%APPDATA%\Cooperativa NFC\` se copia sola).
 
 ### macOS (11 o superior)
-1. Descargue el archivo para su Mac: `CooperativaNFC-2.0.0-arm64.dmg/.zip` (Apple Silicon M1/M2/M3/M4) o `-x64` (Intel).
-2. Arrastre **Cooperativa NFC** a *Aplicaciones*.
+1. Descargue el archivo para su Mac: `ZukiPay-2.1.0-arm64.dmg/.zip` (Apple Silicon M1/M2/M3/M4) o `-x64` (Intel).
+2. Arrastre **Zuki Pay** a *Aplicaciones*.
 3. Si la app no está firmada/notarizada, macOS dirá que *“no se puede abrir porque proviene de un desarrollador no identificado”* o que *“está dañada”*. Solución:
    - Clic derecho sobre la app → **Abrir** → **Abrir**; o en *Ajustes del Sistema → Privacidad y seguridad* → **Abrir igualmente**.
    - Si dice “dañada” (común en Apple Silicon con builds hechos fuera de una Mac), en Terminal:
      ```bash
-     xattr -cr "/Applications/Cooperativa NFC.app"
-     codesign --force --deep --sign - "/Applications/Cooperativa NFC.app"
+     xattr -cr "/Applications/Zuki Pay.app"
+     codesign --force --deep --sign - "/Applications/Zuki Pay.app"
      ```
 4. Igual que en Windows, no hay base local (solo `config.json` con la dirección del servidor).
 
@@ -259,7 +259,7 @@ Desde la versión 2.0 **no hay sincronización**: la caja es un cliente en líne
 - Ya no existe el bloqueo `SOLO_ESCRITORIO`: con o sin caja vieja vinculada, ventas, recargas, tarjetas, alumnos y productos se registran desde la web/tableta y desde la caja nueva.
 - **Cómo cambiar una escuela que usaba la caja 1.x** (hacerlo en este orden):
   1. **Antes de desplegar** la versión nueva del servidor, abra la caja vieja con internet y presione **“Sincronizar ahora”** hasta que diga *Sincronizado* y *0 pendientes*. (Si el servidor nuevo ya está desplegado, ponga temporalmente `LEGACY_SYNC=1` en Render, sincronice la caja vieja y **quite la variable**.)
-  2. Desinstale la caja vieja e instale `CooperativaNFC-Setup-2.0.0.exe`. Entre con la cuenta del servidor.
+  2. Desinstale la caja vieja e instale `ZukiPay-Setup-2.1.0.exe`. Entre con la cuenta del servidor.
   3. Si alguna escuela no tenía servidor (solo caja local), sus datos locales **no se migran solos**: hay que vincularla una vez con la caja 1.x y `LEGACY_SYNC=1` para subirlos.
 - `LEGACY_SYNC=1` reactiva el comportamiento anterior (incluido el bloqueo `SOLO_ESCRITORIO` mientras exista una caja principal). Úselo solo unos minutos para la migración.
 
@@ -334,9 +334,9 @@ Artefactos en `dist/`. Los instaladores **no están firmados** (ver abajo).
 
 ```bash
 npm install
-npm run dist:win     # Windows x64 → dist/CooperativaNFC-Setup-2.0.0.exe (NSIS, en español)
+npm run dist:win     # Windows x64 → dist/ZukiPay-Setup-2.1.0.exe (NSIS, en español)
 npm run dist:mac     # macOS → dist/*.dmg y *.zip para x64 y arm64 (requiere una Mac)
-npm run dist:linux   # Linux → dist/CooperativaNFC-2.0.0-x86_64.AppImage (pruebas)
+npm run dist:linux   # Linux → dist/ZukiPay-2.1.0-x86_64.AppImage (pruebas)
 ```
 - **Windows desde Linux**: requiere Wine con soporte de 32 bits (Debian/Ubuntu: `sudo dpkg --add-architecture i386 && sudo apt update && sudo apt install wine wine32:i386`). Desde Windows no se necesita nada extra.
 - **macOS**: el `.dmg` solo se genera en una Mac (usa `hdiutil`). En una Mac con Xcode Command Line Tools (`xcode-select --install`):
@@ -395,3 +395,9 @@ Más: integración con lectores en `INTEGRACION_NFC.md`; mejoras futuras en `PEN
 - **Reportes (administrador):** Hoy / Esta semana / Este mes / Personalizado; ventas, número de ventas, ticket promedio, recargas, ventas por día, más vendidos, por cajero y rechazadas. **Descargar PDF**, **Descargar imagen** (PNG) y Excel (CSV). Botón **Corte del día**. El cajero solo ve su **Corte del día**.
 - **Inventario:** existencias (piezas) y stock mínimo opcionales por producto (en blanco = sin control); se descuentan en la misma transacción de la venta y regresan al **cancelar una venta** (Movimientos → Cancelar venta). Opción "No vender si no hay existencias". **+ Entrada** con bitácora ("Movimientos de inventario"). Al llegar al mínimo se crea un aviso en **Notificaciones** (con insignia) y el filtro **Por agotarse** en Productos.
 - Migración: solo tablas y columnas nuevas (no se borra ni reescribe nada). Pruebas: `npm test`, `xvfb-run npx electron scripts/e2e-v21.js` (capturas 90–94).
+
+## Marca Zuki Pay (v2.1.0)
+
+- El sistema se llama **Zuki Pay** (antes "Cooperativa NFC"). Identificadores internos (paquete `cooperativa-nfc`, base de datos, URL de Render, repositorio) no cambian.
+- Logo opción J (navy + menta/cian). Íconos regenerados con `python3 scripts/gen-icons-zukipay.py` (PWA, favicon, `build/icon.png` 1024 y `build/icon.ico` 16–256).
+- El instalador y `Zuki Pay.exe` llevan el ícono (verificado con `wrestool -x -t 14`). Capturas: `docs/capturas/v2/99-zukipay-login.png`, `99b-zukipay-panel.png` (`npm run e2e:zukipay`).

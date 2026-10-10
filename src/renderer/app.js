@@ -1,5 +1,5 @@
 'use strict';
-/* Cooperativa NFC — interfaz (renderer). Sin frameworks ni build. */
+/* Zuki Pay — interfaz (renderer). Sin frameworks ni build. */
 (function () {
   // ---------- utilidades ----------
   const $app = document.getElementById('app');
@@ -159,7 +159,7 @@
     const subtitle = state.user.role === 'superadmin' ? 'Zuki Company · Plataforma' : (state.user.role === 'tutor' ? 'Tiendita escolar' : (state.user.school_name || 'Tiendita escolar'));
     $app.appendChild(h('div', { class: 'layout' },
       h('aside', { class: 'side' },
-        h('div', { class: 'brand' }, '🪪 Cooperativa NFC', h('small', null, subtitle)),
+        h('div', { class: 'brand' }, h('img', { class: 'brand-logo', src: 'logo-zukipay-blanco.png', alt: 'Zuki Pay' }), h('small', null, subtitle)),
         h('nav', { class: 'nav' }, NAV[state.user.role].map(([title, its]) => h('div', { class: 'nav-group' }, h('div', { class: 'nav-title' }, title),
           its.map(([k, l, ico]) => h('a', { class: k === navActive ? 'active' : '', tabindex: '0', 'data-view': k, onclick: () => go(k), onkeydown: (e) => { if (e.key === 'Enter') go(k); } },
             h('span', { class: 'ico' }, ico), h('span', null, l), k === 'alertas' && state.alertCount ? h('span', { class: 'count' }, String(state.alertCount)) : null,
@@ -260,7 +260,7 @@
       }
     };
     $app.appendChild(h('div', { class: 'login-wrap' }, h('form', { class: 'card login form', onsubmit: submit },
-      h('div', { class: 'logo' }, '🪪'), h('h1', null, 'Cooperativa NFC'), h('p', { class: 'tag' }, 'Tiendita escolar con tarjeta'), paused,
+      h('div', { class: 'logo' }, h('img', { src: 'logo-zukipay.png', alt: 'Zuki Pay' })), h('h1', { class: 'sr-only' }, 'Zuki Pay'), h('p', { class: 'tag' }, 'Tiendita escolar con tarjeta'), paused,
       field('Usuario, correo o teléfono', u), field('Contraseña', p), err,
       h('button', { class: 'btn primary lg block', type: 'submit' }, 'Entrar'),
       WEB ? h('div', { class: 'links' },
@@ -376,7 +376,7 @@
     }
     data.forEach((d, i) => {
       const bh = (d.total_cents / max) * ih; const x = pad.l + i * bw + bw * 0.15;
-      const r = mk('rect', { x, y: pad.t + ih - bh, width: bw * 0.7, height: Math.max(bh, 0), rx: 4, fill: '#2f6fec' });
+      const r = mk('rect', { x, y: pad.t + ih - bh, width: bw * 0.7, height: Math.max(bh, 0), rx: 4, fill: '#0b7f86' });
       const t = document.createElementNS(NS, 'title'); t.textContent = `${d.date}: ${money(d.total_cents)}`; r.appendChild(t);
       const [, m, dd] = d.date.split('-');
       if (i % Math.ceil(data.length / 16) !== 0) return;
@@ -921,11 +921,11 @@
     const F = (sz, w) => `${w || 400} ${sz}px "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
     g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
     let y = M;
-    g.fillStyle = '#2f6fec'; g.fillRect(M, y, cw, 8); y += 52;
+    g.fillStyle = '#0b7f86'; g.fillRect(M, y, cw, 8); y += 52;
     g.fillStyle = '#111827'; g.font = F(40, 800); g.fillText(r.school_name || 'Cooperativa escolar', M, y); y += 46;
     g.font = F(28, 600); g.fillStyle = '#374151'; g.fillText(`${reportTitle(r, corte)} · ${rangeText(r)}`, M, y); y += 34;
     g.font = F(20); g.fillStyle = '#6b7280';
-    g.fillText(`Generado: ${fmtDate(r.generated_at)}${r.only_cashier ? ' · Cajero: ' + r.only_cashier : ''} · Cooperativa NFC`, M, y); y += 36;
+    g.fillText(`Generado: ${fmtDate(r.generated_at)}${r.only_cashier ? ' · Cajero: ' + r.only_cashier : ''} · Zuki Pay`, M, y); y += 36;
     const stats = [['Ventas', money(r.sales_cents)], ['Número de ventas', String(r.sales_count)], ['Ticket promedio', money(r.avg_ticket_cents)], ['Recargas', money(r.recharges_cents) + ` (${r.recharges_count})`],
       ['Ventas rechazadas', String(r.rejected_count)], ['Monto rechazado', money(r.rejected_cents)], ['Ventas canceladas', String(r.cancelled_count)], ['Monto cancelado', money(r.cancelled_cents)]];
     const bw = (cw - 3 * 16) / 4;
@@ -945,7 +945,7 @@
     g.textAlign = 'center';
     days.forEach((d, i) => {
       const bh = (d.total_cents / max) * ch; const x = M + pl + i * bwid;
-      g.fillStyle = '#2f6fec'; g.fillRect(x + bwid * 0.15, y + ch - bh, bwid * 0.7, bh);
+      g.fillStyle = '#0b7f86'; g.fillRect(x + bwid * 0.15, y + ch - bh, bwid * 0.7, bh);
       if (i % every === 0) { g.fillStyle = '#6b7280'; g.fillText(`${d.date.slice(8, 10)}/${d.date.slice(5, 7)}`, x + bwid / 2, y + ch + 22); }
     });
     g.textAlign = 'left'; y += ch + 60;
@@ -1602,7 +1602,7 @@
 
   // ----- Hoja imprimible de códigos de activación para padres -----
   const SHEET_CSS = `.codesheet{font-family:"Segoe UI",Arial,sans-serif;color:#1e2533}
-.codesheet .sh-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #2f6fec;padding-bottom:6px;margin-bottom:10px}
+.codesheet .sh-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #0b7f86;padding-bottom:6px;margin-bottom:10px}
 .codesheet .sh-head h2{margin:0;font-size:16px}.codesheet .sh-head div{font-size:11px;color:#6b7385}
 .codesheet .sh-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .codesheet .sh-card{border:1.5px dashed #9aa5bd;border-radius:10px;padding:10px 12px;break-inside:avoid;page-break-inside:avoid;font-size:11.5px;line-height:1.35}
@@ -1613,7 +1613,7 @@
     return h('div', { class: 'codesheet' }, h('style', null, SHEET_CSS),
       h('div', { class: 'sh-head' }, h('h2', null, `Códigos de activación para padres — ${school || ''}`), h('div', null, `Generado ${new Date().toLocaleDateString('es-MX')} · ${rows.length} alumno(s)`)),
       h('div', { class: 'sh-grid' }, rows.map((r) => h('div', { class: 'sh-card' },
-        h('div', { class: 'sh-school' }, school || 'Cooperativa NFC'), h('div', { class: 'sh-name' }, r.child_name), h('div', null, [r.grade, r.card_uid ? 'Tarjeta ' + r.card_uid : null].filter(Boolean).join(' · ')),
+        h('div', { class: 'sh-school' }, school || 'Zuki Pay'), h('div', { class: 'sh-name' }, r.child_name), h('div', null, [r.grade, r.card_uid ? 'Tarjeta ' + r.card_uid : null].filter(Boolean).join(' · ')),
         r.code ? h('div', { class: 'sh-code' }, r.code) : h('div', { class: 'sh-nocode' }, r.linked ? 'Ya tiene padre/tutor vinculado' : 'Código pendiente (sincronice la caja con el servidor)'),
         h('ol', null, h('li', null, 'Abra en su celular: ', h('b', null, url || 'la dirección que le indique la escuela')), h('li', null, 'Toque "Tengo un código de invitación".'), h('li', null, 'Escriba el código, sus datos y una contraseña.')),
         h('div', { class: 'sh-foot' }, r.expires_at ? `Vence: ${fmtDate(r.expires_at)}. ` : '', 'Con su cuenta verá saldo e historial, y podrá poner límites o bloquear la tarjeta.')))));

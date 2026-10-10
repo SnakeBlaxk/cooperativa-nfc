@@ -1,4 +1,4 @@
-# Guía de arranque — Cooperativa NFC para escuelas
+# Guía de arranque — Zuki Pay para escuelas
 
 Guía sencilla, paso a paso, para poner a funcionar la cooperativa con tarjetas en una escuela.
 > ## ⚠️ Se necesita internet
@@ -15,7 +15,7 @@ Está pensada para alguien **sin conocimientos técnicos**. Si algún paso le re
 | **Servidor** | La "página de internet" del sistema. Ahí entran los padres desde su celular y ahí Zuki Company administra todas las escuelas. Se instala **una sola vez** para todas las escuelas. |
 | **Superadministrador** | La cuenta de Zuki Company (dueña del sistema). Da de alta escuelas. |
 | **Administrador de la escuela** | La persona de la escuela que maneja la cooperativa (precios, alumnos, tarjetas). |
-| **Caja** | La computadora (o tableta) de la cooperativa donde se cobra. Puede ser el programa "Cooperativa NFC" instalado o simplemente el navegador con la dirección del servidor: es la misma app. **Necesita internet.** |
+| **Caja** | La computadora (o tableta) de la cooperativa donde se cobra. Puede ser el programa "Zuki Pay" instalado o simplemente el navegador con la dirección del servidor: es la misma app. **Necesita internet.** |
 | **Lector** | El aparatito USB donde se acerca la tarjeta. |
 | **Código de invitación** | Un código como `COOP-AB12-CD34` que se entrega al papá o mamá para que cree su cuenta y vea a su hijo. |
 
@@ -84,12 +84,12 @@ En **Escuelas → Administrar** puede después: editar datos y plan, llevar la *
 > En una **tableta** no hay que instalar nada: abra la dirección del servidor en el navegador (Chrome o Safari) y use "Agregar a pantalla de inicio".
 
 1. Copie a la computadora el instalador:
-   - Windows: `CooperativaNFC-Setup-2.0.0.exe`
+   - Windows: `ZukiPay-Setup-2.1.0.exe`
    - Mac: el archivo `.zip` (Apple M1/M2/M3 = `arm64`, Mac con Intel = `x64`)
 2. **Windows**: ábralo. Si sale "Windows protegió su PC", pulse **Más información → Ejecutar de todas formas**. Siga los pasos hasta terminar.
    **Mac**: abra el zip, arrastre la app a *Aplicaciones*, y la primera vez ábrala con **clic derecho → Abrir → Abrir**.
 3. Conecte el **lector** de tarjetas al USB.
-4. Abra **Cooperativa NFC** (con internet). Se conecta sola al servidor `https://cooperativa-nfc.onrender.com` y muestra la pantalla de entrada.
+4. Abra **Zuki Pay** (con internet). Se conecta sola al servidor `https://cooperativa-nfc.onrender.com` y muestra la pantalla de entrada.
    - Si su servidor tiene otra dirección: menú **Archivo → Servidor…**, escríbala y pulse **Guardar y conectar**.
    - Si dice *Conectando con el servidor…* espere: el servidor gratuito puede tardar hasta 1 minuto en despertar.
 5. Entre con el usuario y contraseña **del administrador de la escuela** (los del Paso 2). Ya no hay cuentas "locales" ni que vincular nada.
@@ -173,7 +173,7 @@ En la caja (cajero o administrador):
 ## Paso 9. Operación diaria
 
 **Al abrir**
-- Encienda la computadora, abra **Cooperativa NFC** y entre con el usuario del **cajero**.
+- Encienda la computadora, abra **Zuki Pay** y entre con el usuario del **cajero**.
 - Verifique que haya internet. Si aparece el aviso **“Sin conexión a internet…”**, no se puede cobrar: revise el módem o comparta datos desde un celular; el aviso se quita solo cuando regresa la conexión.
 
 **Para cobrar** (menú **Punto de venta**)
@@ -215,4 +215,4 @@ En la caja (cajero o administrador):
 | Sospecha de robo de contraseña o recargas falsas | Superadministrador: **Seguridad y emergencia** → congelar recargas de esa escuela, bloquear administradores, o el botón rojo **ALERTA ROJA** (todo queda en solo lectura). Revise **Alertas** y **Bitácora**. |
 | La escuela dejó de pagar | El superadministrador: *Administrar → Suspender*. El personal ya no podrá entrar; los papás aún ven el saldo. Para reactivar: **Activar**. |
 
-¿Dudas? Zuki Company — soporte de Cooperativa NFC.
+¿Dudas? Zuki Company — soporte de Zuki Pay.
