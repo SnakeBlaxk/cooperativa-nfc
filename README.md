@@ -401,3 +401,15 @@ Más: integración con lectores en `INTEGRACION_NFC.md`; mejoras futuras en `PEN
 - El sistema se llama **Zuki Pay** (antes "Cooperativa NFC"). Identificadores internos (paquete `cooperativa-nfc`, base de datos, URL de Render, repositorio) no cambian.
 - Logo opción J (navy + menta/cian). Íconos regenerados con `python3 scripts/gen-icons-zukipay.py` (PWA, favicon, `build/icon.png` 1024 y `build/icon.ico` 16–256).
 - El instalador y `Zuki Pay.exe` llevan el ícono (verificado con `wrestool -x -t 14`). Capturas: `docs/capturas/v2/99-zukipay-login.png`, `99b-zukipay-panel.png` (`npm run e2e:zukipay`).
+
+## Pantalla "Instala Zuki Pay" (celulares y tabletas)
+
+En iPhone, iPad (incluido iPadOS que se reporta como Mac táctil) y Android, si Zuki Pay se abre en el navegador
+(no instalada), aparece una pantalla completa con instrucciones para instalarla (`server/public/install-gate.js`):
+iOS Safari → Compartir → "Agregar a pantalla de inicio"; otros navegadores de iOS → mismo menú en iOS 16.4+ o
+abrir en Safari ("Copiar enlace"); Android Chrome → botón "Instalar Zuki Pay" (si el navegador ofrece
+`beforeinstallprompt`) o tres puntitos → "Instalar app"; otros navegadores de Android → se sugiere Chrome.
+Computadoras y la app de escritorio (Electron) no la muestran. Desaparece al instalar o al abrir desde el ícono.
+
+**Pruebas:** abrir con `?nogate=1` (p. ej. `https://…/?nogate=1`) la omite durante esa pestaña. No hay otro modo
+de saltarla. Capturas: `npm run e2e:instalar` → `docs/capturas/v2/100-instalar-ios.png` y `101-instalar-android.png`.
