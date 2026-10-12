@@ -226,3 +226,25 @@ tr.low td { background: #fffaf0; }
 .nav a.active { background: linear-gradient(135deg, var(--mint), var(--cyan)); color: var(--navy); }
 .nav a.active .ico { filter: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Mis tarjetas: Buscar tarjeta (lector USB 125 kHz) — letra grande */
+.find-box { border: 2px solid var(--mint); background: linear-gradient(135deg, #f0fffa, #eefaff); margin: 0 0 16px; }
+.find-title { font-size: 1.6rem; color: var(--navy); margin: 0 0 4px; }
+.find-help { font-size: 1.15rem; color: var(--muted); margin: 0 0 12px; }
+.find-inrow { gap: 10px; flex-wrap: wrap; }
+.find-input { flex: 1; min-width: 220px; font-size: 1.8rem !important; padding: 14px 18px !important; letter-spacing: 2px; font-family: ui-monospace, Menlo, Consolas, monospace; border: 2px solid var(--navy-2) !important; border-radius: 14px; }
+.find-input:focus { outline: 4px solid var(--mint); outline-offset: 1px; }
+.btn.lg { font-size: 1.2rem; padding: 14px 22px; min-height: 54px; }
+.find-out:empty { display: none; }
+.find-card { margin-top: 14px; padding: 16px 18px; border-radius: 14px; background: #fff; border: 2px solid var(--border); font-size: 1.2rem; }
+.find-card.hit { border-color: var(--ok); }
+.find-card.miss { border-color: var(--err); }
+.find-uid { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 2rem; font-weight: 700; color: var(--navy); letter-spacing: 2px; margin-bottom: 6px; }
+.find-row { margin: 4px 0; }
+.find-st { display: inline-block; padding: 4px 14px; border-radius: 999px; font-weight: 700; background: var(--primary-bg); color: var(--primary-d); }
+.find-st.st-entregada, .find-st.st-asignada { background: var(--ok-bg); color: var(--ok); }
+.find-st.st-bloqueada, .find-st.st-danada { background: var(--err-bg); color: var(--err); }
+.find-msg { font-size: 1.4rem; font-weight: 700; margin: 6px 0 12px; }
+.find-msg.err { color: var(--err); }
+.find-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+tr.stock-hit td { background: #d9fff1 !important; box-shadow: inset 0 2px 0 var(--mint), inset 0 -2px 0 var(--mint); }

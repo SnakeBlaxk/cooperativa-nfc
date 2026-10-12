@@ -45,6 +45,21 @@ function createCardStock(db, { security = null, now = () => new Date() } = {}) {
       FROM card_stock s LEFT JOIN schools sc ON sc.id = s.school_id LEFT JOIN cards k ON k.uid = s.uid LEFT JOIN children c ON c.id = k.child_id
       ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY s.id DESC LIMIT ${limit}`, p);
   }
+  // Buscar una tarjeta por UID (lector USB 125 kHz): normaliza igual que el alta y, si no hay
+  // coincidencia exacta, acepta un UID que solo difiere por ceros a la izquierda.
+  function find(actor, a = {}) {
+    need(actor);
+    const uid = tryNorm(a.uid);
+    if (!uid) return { uid: null, found: false, card: null };
+    const base = `SELECT s.*, sc.name AS school_name, k.id AS card_id, c.full_name AS child_name
+      FROM card_stock s LEFT JOIN schools sc ON sc.id = s.school_id LEFT JOIN cards k ON k.uid = s.uid LEFT JOIN children c ON c.id = k.child_id`;
+    let card = db.get(`${base} WHERE s.uid = ?`, [uid]);
+    if (!card) {
+      const core = uid.replace(/^0+/, '') || '0';
+      card = db.get(`${base} WHERE (CASE WHEN LTRIM(s.uid, '0') = '' THEN '0' ELSE LTRIM(s.uid, '0') END) = ? ORDER BY s.id LIMIT 1`, [core]);
+    }
+    return { uid, found: !!card, card: card || null };
+  }
   function summary(actor) {
     need(actor);
     const by = Object.fromEntries(STATES.map((s) => [s, 0]));
@@ -209,6 +224,7 @@ function createCardStock(db, { security = null, now = () => new Date() } = {}) {
   const methods = {
     stockList: (u, a) => list(u, a),
     stockSummary: (u) => summary(u),
+    stockFind: (u, a) => find(u, a),
     stockAdd: (u, a, c) => add(u, a, c),
     stockDeliver: (u, a, c) => deliver(u, a, c),
     stockSetStatus: (u, a, c) => setStatus(u, a, c),
@@ -217,7 +233,7 @@ function createCardStock(db, { security = null, now = () => new Date() } = {}) {
     stockPurge: (u, a, c) => purge(u, a, c),
     stockExport: (u, a) => exportCsv(u, a),
   };
-  return { methods, list, summary, add, deliver, setStatus, update, remove, purge, exportCsv };
+  return { methods, list, find, summary, add, deliver, setStatus, update, remove, purge, exportCsv };
 }
 
 module.exports = { createCardStock, parseUidList, STATES };

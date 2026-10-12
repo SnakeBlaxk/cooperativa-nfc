@@ -61,6 +61,16 @@ test('superadmin: alta uno por uno y en lote (repetidos/inválidos informados), 
   assert.ok(S.db.get("SELECT 1 AS x FROM audit_log WHERE action = 'inventario_tarjetas_entrega'"));
 });
 
+test('superadmin: stockFind (Buscar tarjeta) normaliza y tolera ceros a la izquierda', async () => {
+  let r = (await sup('stockFind', { uid: '0001234570' })).data; assert.equal(r.found, true); assert.equal(r.card.uid, '0001234570'); assert.equal(r.card.status, 'entregada'); assert.ok(r.card.school_name);
+  r = (await sup('stockFind', { uid: ' 000-123-4570 ' })).data; assert.equal(r.card.uid, '0001234570');
+  r = (await sup('stockFind', { uid: '1234570' })).data; assert.equal(r.found, true); assert.equal(r.card.uid, '0001234570');
+  r = (await sup('stockFind', { uid: '00007777777' })).data; assert.equal(r.card.uid, '0007777777');
+  r = (await sup('stockFind', { uid: '0009990001' })).data; assert.equal(r.found, false); assert.equal(r.uid, '0009990001');
+  r = (await sup('stockFind', { uid: '!!' })).data; assert.equal(r.found, false);
+  assert.equal((await api('/api/super/stockFind', { body: { uid: '0001234570' }, token: A })).status, 403);
+});
+
 test('asignar: tarjeta fuera del inventario, sin entregar o de otra escuela se rechaza con alerta y bitácora', async () => {
   for (const [uid, why] of [['0009990001', /no está en el inventario/], ['0007777777', /no ha sido entregada/], ['0001234570', /otra escuela/]]) {
     for (const [m, body] of [['assignCardByUid', { uid, child_id: kid1 }], ['registerCard', { uid }]]) {

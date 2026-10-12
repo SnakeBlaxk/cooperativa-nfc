@@ -2135,7 +2135,7 @@
       listBox.append(rows.length ? h('table', { class: 'resp resp-md' }, h('tr', { class: 'head' }, h('th', null, all), ['UID', 'Tipo', 'Estado', 'Escuela', 'Alumno', 'Alta', 'Lote / nota', ''].map((x) => h('th', null, x))),
         rows.map((c) => {
           const cb = h('input', { type: 'checkbox', checked: selected.has(c.id), onchange: () => { if (cb.checked) selected.add(c.id); else selected.delete(c.id); drawSelBar(); } });
-          return h('tr', null, h('td', null, cb), h('td', { 'data-label': 'UID' }, h('code', null, c.uid)), h('td', { 'data-label': 'Tipo' }, c.kind === 'personalizada' ? 'Personalizada' : 'Normal'),
+          return h('tr', { 'data-stock-id': c.id, class: c.id === highlightId ? 'stock-hit' : null }, h('td', null, cb), h('td', { 'data-label': 'UID' }, h('code', null, c.uid)), h('td', { 'data-label': 'Tipo' }, c.kind === 'personalizada' ? 'Personalizada' : 'Normal'),
             h('td', { 'data-label': 'Estado' }, stockBadge(c.status)), h('td', { 'data-label': 'Escuela' }, c.school_name || h('span', { class: 'muted' }, '—')),
             h('td', { 'data-label': 'Alumno' }, c.child_name || '—'), h('td', { 'data-label': 'Alta', class: 'small' }, fmtDate(c.created_at)),
             h('td', { 'data-label': 'Lote / nota', class: 'small' }, [c.batch, c.note].filter(Boolean).join(' · ') || '—'),
@@ -2143,6 +2143,7 @@
               ['bloqueada', 'danada'].includes(c.status) ? h('button', { class: 'btn sm', onclick: () => bulkStatus('desbloquear', [c.id]) }, 'Desbloquear') : h('button', { class: 'btn sm', onclick: () => bulkStatus('bloqueada', [c.id]) }, 'Bloquear'), ' ',
               !c.card_id ? h('button', { class: 'btn sm danger', onclick: () => removeCards([c.id]) }, 'Eliminar') : h('button', { class: 'btn sm danger', onclick: () => purgeCards([c.id]) }, 'Eliminar definitivamente')));
         })) : h('div', { class: 'empty' }, 'No hay tarjetas con esos filtros'), h('p', { class: 'small muted' }, `${rows.length} tarjeta(s) mostradas`));
+      if (lastFound && !findBusy) doFind(lastFound, true);
     };
     for (const el of [fSt, fSch]) el.addEventListener('change', reload);
     let qt; q.addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(reload, 250); });
@@ -2150,8 +2151,57 @@
       const r = await safe(() => superCall('stockExport', filters()));
       if (r) downloadBlob(new Blob(['\ufeff' + r.csv], { type: 'text/csv;charset=utf-8' }), r.filename);
     };
+    // --- Buscar tarjeta (lector USB 125 kHz tipo teclado: 10 dígitos + Enter) ---
+    let highlightId = null;
+    const findIn = h('input', { class: 'find-input', placeholder: 'Pase la tarjeta o escriba el número', autocomplete: 'off', inputmode: 'numeric', 'data-find-input': '', 'aria-label': 'Buscar tarjeta' });
+    const findOut = h('div', { class: 'find-out', 'aria-live': 'polite' });
+    let findT; let lastFound = null; let findBusy = false;
+    const doFind = async (raw, quiet) => {
+      const v = String(raw || '').trim(); if (!v) return;
+      let r; try { r = await superCall('stockFind', { uid: v }); } catch (e) { findOut.innerHTML = ''; findOut.append(h('div', { class: 'find-msg err' }, '✖ ' + e.message)); return; }
+      findOut.innerHTML = '';
+      if (!r.found) {
+        if (!quiet) beep(false); lastFound = null; highlightId = null;
+        findOut.append(h('div', { class: 'find-card miss' }, h('div', { class: 'find-uid' }, r.uid || v),
+          h('div', { class: 'find-msg err' }, 'Esta tarjeta no está en tu inventario'),
+          r.uid ? h('button', { class: 'btn primary lg', onclick: async () => {
+            try {
+              const a = await superCall('stockAdd', { uid: r.uid, kind: kind.value, batch: batch.value || undefined });
+              if (a.added) { toast('Tarjeta ' + a.added_uids[0] + ' agregada al inventario', 'ok'); lastFound = a.added_uids[0]; findBusy = true; try { await reload(); } finally { findBusy = false; } doFind(a.added_uids[0]); } else toast('No se pudo agregar', 'err');
+            } catch (e) { toast(e.message, 'err'); }
+          } }, '➕ Agregar a mi inventario') : null));
+        return;
+      }
+      if (!quiet) beep(true); const c = r.card; lastFound = c.uid; highlightId = c.id;
+      const st = c.status; const blocked = ['bloqueada', 'danada'].includes(st);
+      const stTxt = { en_stock: 'En stock', entregada: 'Entregada', asignada: 'Entregada (asignada a alumno)', bloqueada: 'Bloqueada', danada: 'Dañada' }[st] || st;
+      findOut.append(h('div', { class: 'find-card hit' },
+        h('div', { class: 'find-uid' }, c.uid, c.uid !== r.uid ? h('span', { class: 'small muted' }, `  (leído: ${r.uid})`) : null),
+        h('div', { class: 'find-row' }, h('span', { class: 'muted' }, 'Estado: '), h('span', { class: 'find-st st-' + st }, stTxt)),
+        h('div', { class: 'find-row' }, h('span', { class: 'muted' }, 'Escuela: '), h('b', null, c.school_name || 'Sin escuela')),
+        c.child_name ? h('div', { class: 'find-row' }, h('span', { class: 'muted' }, 'Alumno: '), h('b', null, c.child_name)) : null,
+        h('div', { class: 'find-actions' },
+          h('button', { class: 'btn primary lg', onclick: () => pickSchool('Entregar a escuela', { ids: [c.id] }) }, '🏫 Entregar a escuela'),
+          blocked ? h('button', { class: 'btn lg', onclick: () => bulkStatus('desbloquear', [c.id]) }, 'Desbloquear') : h('button', { class: 'btn lg', onclick: () => bulkStatus('bloqueada', [c.id]) }, '⛔ Bloquear'),
+          !c.card_id ? h('button', { class: 'btn lg danger', onclick: () => removeCards([c.id]) }, 'Quitar del inventario') : h('button', { class: 'btn lg danger', onclick: () => purgeCards([c.id]) }, '🗑 Eliminar definitivamente'))));
+      // resaltar y desplazar en la lista (si no está visible con los filtros, se limpian)
+      if (quiet) return;
+      let row = listBox.querySelector(`[data-stock-id="${c.id}"]`);
+      if (!row && (q.value || fSt.value || fSch.value)) { q.value = ''; fSt.value = ''; fSch.value = ''; findBusy = true; try { await reload(); } finally { findBusy = false; } row = listBox.querySelector(`[data-stock-id="${c.id}"]`); }
+      listBox.querySelectorAll('.stock-hit').forEach((x) => x.classList.remove('stock-hit'));
+      if (row) { row.classList.add('stock-hit'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      setTimeout(() => findIn.focus({ preventScroll: true }), 600);
+    };
+    const runFind = () => { clearTimeout(findT); const v = findIn.value; findIn.value = ''; doFind(v); };
+    findIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runFind(); } });
+    // al escribir/pegar: si ya hay 10 dígitos (lectura completa), buscar sin esperar Enter
+    findIn.addEventListener('input', () => { clearTimeout(findT); const d = findIn.value.replace(/\D/g, ''); if (d.length >= 10 && /^[\d\s\-]+$/.test(findIn.value)) findT = setTimeout(runFind, 350); });
+    const findBox = h('div', { class: 'card find-box' }, h('h2', { class: 'find-title' }, '🔎 Buscar tarjeta'),
+      h('p', { class: 'find-help' }, 'Pase la tarjeta por el lector o escriba su número y presione Enter.'),
+      h('div', { class: 'row find-inrow' }, findIn, h('button', { class: 'btn primary lg', onclick: runFind }, 'Buscar')), findOut);
     put(main, pageHead('Mis tarjetas (inventario)', 'Solo las tarjetas de este inventario, entregadas a una escuela, se pueden asignar, cobrar o recargar en esa escuela.',
       h('button', { class: 'btn', onclick: () => pickSchool('Entregar un rango a escuela') }, '🏫 Entregar rango'), h('button', { class: 'btn', onclick: exportCsv }, '⬇ Exportar CSV')),
+      findBox,
       h('div', { class: 'grid g2' },
         h('div', { class: 'card form' }, h('h2', null, 'Registrar tarjetas una por una'),
           field('Tarjeta (UID)', uidIn, 'Lector USB 125 kHz o NFC: con el cursor aquí, acerque la tarjeta; se agrega sola al leerla (Enter).'),
@@ -2163,7 +2213,7 @@
       countsBox,
       h('div', { class: 'card tablewrap' }, h('h2', null, 'Tarjetas'), h('div', { class: 'filters row', style: { gap: '8px', flexWrap: 'wrap', marginBottom: '10px' } }, q, fSt, fSch), selBar, listBox));
     await reload();
-    setTimeout(() => uidIn.focus(), 50);
+    setTimeout(() => findIn.focus(), 50);
   };
 
   // ======================================================================
