@@ -47,7 +47,25 @@ Necesita una cuenta en un servicio de hospedaje que mantenga el programa encendi
 ✅ Listo: ya ve la pantalla **Escuelas** (vacía).
 
 > Consejo: anote la dirección del servidor; la usará en la caja y la recibirán los padres.
-> Respaldo: en **Seguridad y emergencia → Descargar respaldo** baje una copia cada semana y guárdela en una USB o en su nube.
+> Respaldo: el servidor guarda una copia solo y, en **Seguridad y emergencia**, puede pulsar **Crear respaldo ahora** o **Descargar respaldo**. Baje una copia cada semana a una USB.
+
+### Correo y copia en la nube (opcional, recomendado)
+
+Sin esto el sistema funciona: la contraseña se muestra en pantalla y la copia queda en el mismo servidor.
+
+Para que la contraseña **llegue al correo** de la persona y las alertas importantes le lleguen a usted:
+
+1. Cree una cuenta en [resend.com](https://resend.com) y verifique su dominio (por ejemplo `zuki.mx`).
+2. Cree una llave (API key).
+3. En Render → *Environment* agregue:
+
+   | Nombre | Valor |
+   |---|---|
+   | `RESEND_API_KEY` | la llave de Resend |
+   | `MAIL_FROM` | `Zuki Pay <avisos@zuki.mx>` (un correo de ese dominio) |
+   | `ALERT_EMAIL` | su correo, donde quiere recibir las alertas |
+
+Para que la copia de la base **también quede en otra nube** (Backblaze B2 o Amazon S3), agregue `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_REGION`, `BACKUP_S3_ACCESS_KEY_ID` y `BACKUP_S3_SECRET_ACCESS_KEY`. En **Seguridad y emergencia** verá si el correo está activo y si la última copia se subió.
 
 ### Guardar los datos (muy importante)
 

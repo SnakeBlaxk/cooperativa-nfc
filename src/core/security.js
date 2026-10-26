@@ -5,6 +5,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { AppError, fmtLocal, str, normEmail, normPhone } = require('./service');
+const { looksLikeEmail } = require('./mailer');
 
 // Métodos de la API que solo leen (todo lo demás se considera escritura)
 const READ_METHODS = new Set(['listUsers', 'listSchoolStock', 'listChildren', 'listCategories', 'listProducts', 'listCards', 'lookupCard', 'getLimits', 'getProhibitions', 'listMovements', 'childSummary', 'dashboard', 'listChangeRequests', 'changeRequestsUnread', 'markChangeRequestsRead', 'listStockMoves', 'getInventorySettings', 'listSchoolNotices', 'markNoticesRead', 'report', 'listRemoved', 'previewDeleteChild', 'getPushPrefs', 'setPushPrefs', 'pushSubscribe', 'pushUnsubscribe', 'securityStatus', 'me', 'login', 'logout']);
@@ -44,6 +45,25 @@ function createSecurity(db, opts = {}) {
   const ts = () => fmtLocal(now());
   const svc = opts.svc; const sync = opts.sync || null; const auth = opts.auth || null;
   const persistence = opts.persistence || (() => ({ mode: 'desconocido' }));
+  const mailer = opts.mailer || null;
+  const appUrl = opts.appUrl || '';
+  function alertRecipients() {
+    const set = new Set((opts.alertEmails || []).map((e) => String(e).trim().toLowerCase()).filter(looksLikeEmail));
+    for (const r of db.all("SELECT email FROM users WHERE role = 'superadmin' AND active = 1 AND email IS NOT NULL AND trim(email) <> ''")) {
+      const e = String(r.email).trim().toLowerCase();
+      if (looksLikeEmail(e)) set.add(e);
+    }
+    return [...set];
+  }
+  function emailAlert(a, id) {
+    if (!id || !mailer || !mailer.configured) return;
+    if (!['alta', 'critica'].includes(a.severity || '')) return;
+    const tos = alertRecipients();
+    if (!tos.length) return;
+    const subject = (a.severity === 'critica' ? 'Zuki Pay: alerta crítica' : 'Zuki Pay: alerta') + ` (${a.kind})`;
+    const text = `${a.message}\n\nRevísela en el panel del superadministrador, en Alertas.`;
+    Promise.all(tos.map((to) => mailer.send({ to, channel: 'email', subject, text }).catch((e) => console.error('[mailer]', e.message)))).catch(() => {});
+  }
   const meta = (k) => { const r = db.get('SELECT value FROM meta WHERE key = ?', [k]); return r ? r.value : null; };
   const setMeta = (k, v) => (v === null ? db.run('DELETE FROM meta WHERE key = ?', [k]) : db.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [k, String(v)]));
   const need = (actor) => { if (!actor || actor.role !== 'superadmin') throw new AppError('Solo el superadministrador puede hacer esto', 'PROHIBIDO'); };
@@ -85,7 +105,7 @@ function createSecurity(db, opts = {}) {
     roles: ['rol_cambiado', 'cuenta_activada', 'cuenta_desactivada', 'usuario_creado', 'usuario_editado', 'cuenta_desbloqueada'],
     accesos: ['login', 'login_fallido', 'cuenta_bloqueada_intentos', 'login_rechazado_bloqueo'],
     mensualidad: ['mensualidad_pago', 'mensualidad_periodo', 'mensualidad_por_vencer', 'mensualidad_tolerancia', 'escuela_pausada', 'escuela_pausada_auto', 'escuela_reactivada', 'login_rechazado_pausa'],
-    emergencia: ['alerta_roja', 'alerta_roja_fin', 'congelar_recargas', 'congelar_ventas', 'solo_lectura', 'cerrar_sesiones', 'bloquear_admin', 'limites_escuela', 'respaldo_descargado'],
+    emergencia: ['alerta_roja', 'alerta_roja_fin', 'congelar_recargas', 'congelar_ventas', 'solo_lectura', 'cerrar_sesiones', 'bloquear_admin', 'limites_escuela', 'respaldo_descargado', 'respaldo_creado'],
   };
 
   // ---------- alertas ----------
@@ -95,8 +115,10 @@ function createSecurity(db, opts = {}) {
       ? db.get('SELECT id FROM alerts WHERE kind = ? AND ref_type IS ? AND ref_id = ?', [a.kind, a.ref_type || null, a.ref_id])
       : db.get('SELECT id FROM alerts WHERE kind = ? AND school_id IS ? AND created_at >= ? AND ack_at IS NULL AND details IS ?', [a.kind, a.school_id || null, minutesAgo(10), a.dedupe || null]);
     if (dup) return null;
-    return db.run('INSERT INTO alerts (created_at, school_id, kind, severity, message, details, ref_type, ref_id) VALUES (?,?,?,?,?,?,?,?)',
+    const id = db.run('INSERT INTO alerts (created_at, school_id, kind, severity, message, details, ref_type, ref_id) VALUES (?,?,?,?,?,?,?,?)',
       [ts(), a.school_id || null, a.kind, a.severity || 'media', a.message, a.dedupe || (a.details ? JSON.stringify(a.details) : null), a.ref_type || null, a.ref_id || null]).lastId;
+    emailAlert(a, id);
+    return id;
   }
   function listAlerts(actor, f = {}) {
     need(actor);
@@ -377,7 +399,7 @@ function createSecurity(db, opts = {}) {
       .map((u) => ({ ...u, active: !!u.active, locked: !!(u.locked_until && u.locked_until > Date.now()) }));
   }
   const userOr404 = (id) => { const u = db.get('SELECT * FROM users WHERE id = ?', [Number(id) || 0]); if (!u) throw new AppError('Cuenta no encontrada', 'NO_ENCONTRADO'); return u; };
-  function setPassword(actor, userId, password, ctx = {}) {
+  async function setPassword(actor, userId, password, ctx = {}) {
     need(actor);
     const u = userOr404(userId);
     if (u.role === 'superadmin' && u.id !== actor.id) throw new AppError('No se puede cambiar la contraseña de otro superadministrador', 'PROHIBIDO');
@@ -389,7 +411,10 @@ function createSecurity(db, opts = {}) {
       db.run('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [u.id]);
     });
     audit(actor, 'contrasena_asignada', { school_id: u.school_id, ip: ctx.ip, target_type: 'user', target_id: u.id, details: { cuenta: u.username, rol: u.role, generada: !password }, severity: 'aviso' });
-    return { user: svc.publicUser(userOr404(u.id)), password: p };
+    const { deliverPassword } = require('./mailer');
+    const fresh = userOr404(u.id);
+    const emailed = await deliverPassword(mailer, fresh, p, { appUrl });
+    return { user: svc.publicUser(fresh), password: p, emailed };
   }
   function setActive(actor, userId, active, ctx = {}) {
     need(actor);

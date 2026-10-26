@@ -6,9 +6,9 @@ Lista priorizada de lo que falta o conviene pulir después de la versión 1.0.
 0. **Guardar los datos de forma permanente en el servidor**: hoy Render gratis usa `/tmp` (se borra al reiniciar). Configurar Turso (gratis) o Render Starter + disco (≈ 7.25 USD/mes). Pasos en README §8.
 0b. Seguridad v2 — siguientes pasos: papelera también para alumnos/tarjetas/usuarios (hoy solo productos usan borrado suave; alumnos y usuarios se desactivan), verificación en dos pasos (2FA) para el superadmin, aviso por correo/WhatsApp de alertas críticas.
 1. **Solo en línea (2.0) — siguientes pasos**: la sincronización sin conexión se retiró. Falta: borrar del código `sync-client.js`/`remote-auth.js` y las rutas `/api/sync/*` cuando ya no queden cajas 1.x; servidor de pago en Render (el gratuito se duerme y tarda ~1 min en despertar, lo que en una caja se ve como “Conectando…”); excluir `src/core` y `sql.js` del paquete de escritorio (ya no se usan ahí).
-2. **Envío real de correos/SMS**: implementar el *mailer* con Resend / SendGrid / Amazon SES y Twilio (SMS o WhatsApp) para enviar contraseñas y avisos (la recuperación por correo está desactivada por política).
+2. **Envío real de correos**: hecho con Resend (`RESEND_API_KEY`, `MAIL_FROM`). Manda contraseñas (si la cuenta tiene correo) y alertas altas/críticas (`ALERT_EMAIL` o el correo del superadministrador). Sigue pendiente el SMS/WhatsApp (Twilio). La recuperación por correo sigue desactivada por política.
 3. **Firma de código**: certificado de Windows (OV/EV) para evitar SmartScreen, y Apple Developer ID + notarización para macOS.
-4. **Respaldos automáticos**: en el servidor, cron + almacenamiento externo (S3/Backblaze) y prueba periódica de restauración.
+4. **Respaldos automáticos**: hecho en el servidor (cada 6 h y al arrancar/apagar). Copia local de 14 días, prueba de que la copia abre, y subida a S3 o Backblaze si están las variables `BACKUP_S3_*`. En Seguridad se puede crear uno en el momento. Sigue pendiente un cron externo si el servidor gratuito se duerme.
 5. **Aviso de privacidad y consentimiento** (LFPDPPP) integrados en el registro de la PWA, y opción de baja/anonimización de alumnos.
 
 ## Funciones
@@ -18,7 +18,7 @@ Lista priorizada de lo que falta o conviene pulir después de la versión 1.0.
 9. **Corte de caja**: apertura/cierre de turno por cajero, efectivo esperado vs contado, reporte imprimible.
 10. **Inventario**: existencias, alertas de stock bajo, entradas de mercancía, costo y utilidad.
 11. **Ticket** impreso (impresora térmica) o mostrado en pantalla para el alumno.
-12. **Reportes**: por grado/grupo, por categoría, consumo saludable vs no saludable, exportar a Excel/PDF.
+12. **Reportes**: el reporte del administrador ya junta ventas, grado/grupo, categoría e inventario (y se acomoda en el celular). Sigue pendiente consumo saludable vs no saludable. Excel/PDF ya existen.
 13. **Múltiples tutores por alumno** (mamá y papá con cuentas separadas).
 14. **Devoluciones** de una venta (hoy se hace con ajuste manual).
 15. Límite por **horario** (p. ej. solo recreo) y lista de productos **permitidos** (en lugar de prohibidos).

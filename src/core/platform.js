@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { STATUSES, isYmd } = require('./billing');
 const { createCardStock } = require('./card-stock');
 const { createRemovals } = require('./removals');
+const { deliverPassword } = require('./mailer');
 function tempPassword() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   const b = crypto.randomBytes(10); let s = '';
@@ -15,7 +16,7 @@ function tempPassword() {
   return s;
 }
 
-function createPlatform(db, { svc, sync, auth, security = null, billing = null, now = () => new Date() } = {}) {
+function createPlatform(db, { svc, sync, auth, security = null, billing = null, appUrl = '', now = () => new Date() } = {}) {
   const ts = () => fmtLocal(now());
   const need = (actor) => { if (!actor || actor.role !== 'superadmin') throw new AppError('Solo el superadministrador puede hacer esto', 'PROHIBIDO'); };
   const getSchool = (id) => {
@@ -86,6 +87,11 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
     const u = svc.createUser(system, { role, username: data.username, full_name: data.full_name, email: data.email || null, phone: data.phone || null, password });
     return { user: u, temporary_password: password };
   }
+  async function withEmail(pack) {
+    if (!pack) return pack;
+    pack.emailed = await deliverPassword(auth && auth.mailer, pack.user, pack.temporary_password, { appUrl });
+    return pack;
+  }
 
   function createSchool(actor, data = {}) {
     need(actor);
@@ -105,6 +111,11 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
       const admin = makeStaff(sid, { role: 'admin', username: data.admin_username, full_name: data.admin_full_name || `Administrador ${d.name}`, email: data.admin_email, phone: data.admin_phone });
       return { school: schoolOut(getSchool(sid)), admin };
     });
+  }
+  async function createSchoolAndMail(actor, data) {
+    const out = createSchool(actor, data);
+    out.admin = await withEmail(out.admin);
+    return out;
   }
   function updateSchool(actor, id, data = {}) {
     need(actor);
@@ -134,7 +145,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
       invitations: auth.listInvitations(actor, { school_id: s.id }).slice(0, 100),
     };
   }
-  function createStaff(actor, schoolId, data = {}) { need(actor); return makeStaff(getSchool(schoolId).id, data); }
+  async function createStaff(actor, schoolId, data = {}) { need(actor); return withEmail(makeStaff(getSchool(schoolId).id, data)); }
   function staffOf(userId) {
     const u = db.get("SELECT * FROM users WHERE id = ? AND role IN ('admin','cajero') AND deleted_at IS NULL", [Number(userId) || 0]);
     if (!u) throw new AppError('Usuario no encontrado', 'NO_ENCONTRADO');
@@ -149,7 +160,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
       db.run('UPDATE users SET password_hash = ?, must_change_password = 0, token_version = token_version + 1, active = 1 WHERE id = ?', [bcrypt.hashSync(password, 10), u.id]);
       db.run('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [u.id]);
     });
-    return { user: svc.publicUser(db.get('SELECT * FROM users WHERE id = ?', [u.id])), temporary_password: password };
+    return withEmail({ user: svc.publicUser(db.get('SELECT * FROM users WHERE id = ?', [u.id])), temporary_password: password });
   }
   function setStaffActive(actor, userId, active) {
     need(actor);
@@ -180,7 +191,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
 
   const M = {
     overview: (u) => overview(u),
-    createSchool: (u, a) => createSchool(u, a),
+    createSchool: (u, a) => createSchoolAndMail(u, a),
     updateSchool: (u, a) => updateSchool(u, a.id, a),
     schoolDetail: (u, a) => schoolDetail(u, a.id),
     createStaff: (u, a) => createStaff(u, a.school_id, a),
@@ -197,7 +208,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
   const BILL = billing ? billing.methods : {};
   const STOCK = createCardStock(db, { security, now }).methods; // inventario de tarjetas (bitácora propia) // mensualidad (registran su propia bitácora)
   const REM = createRemovals(db, { security, now }).methods; // bajas y Papelera de alumnos y tutores (bitácora propia)
-  function handle(user, method, args, ctx = {}) {
+  async function handle(user, method, args, ctx = {}) {
     need(user);
     const a = args && typeof args === 'object' ? args : {};
     if (Object.prototype.hasOwnProperty.call(REM, method)) return REM[method](user, a, ctx);
@@ -206,7 +217,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
     if (Object.prototype.hasOwnProperty.call(STOCK, method)) return STOCK[method](user, a, ctx);
     const fn = Object.prototype.hasOwnProperty.call(M, method) ? M[method] : null;
     if (!fn) throw new AppError('Operación desconocida', 'NO_ENCONTRADO');
-    const out = fn(user, a);
+    const out = await fn(user, a);
     if (security && AUDITED[method]) {
       let action = AUDITED[method];
       if (method === 'setStaffActive' && !a.active) action = 'cuenta_desactivada';
