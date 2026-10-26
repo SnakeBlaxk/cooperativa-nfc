@@ -35,5 +35,5 @@ test('index.html carga la pantalla antes de la app y el SW la guarda (cache v10)
   const html = fs.readFileSync(path.join(__dirname, '../server/public/index.html'), 'utf8');
   assert.ok(html.indexOf('/install-gate.js') > 0 && html.indexOf('/install-gate.js') < html.indexOf('/app.js'));
   const sw = fs.readFileSync(path.join(__dirname, '../server/public/sw.js'), 'utf8');
-  assert.match(sw, /coop-v11/); assert.match(sw, /'\/install-gate\.js'/);
+  assert.match(sw, /coop-v12/); assert.match(sw, /'\/install-gate\.js'/);
 });

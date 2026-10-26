@@ -164,6 +164,10 @@ test('reportes: totales por rango, por día, más vendidos, por cajero, rechazad
   assert.ok(d.recharges_cents > 0); assert.ok(d.rejected_count > 0); assert.ok(d.cancelled_count >= 1);
   assert.equal(d.sales_by_day.length, 1); assert.equal(d.sales_by_day[0].total_cents, exp.s);
   assert.ok(d.top_products.length > 0); assert.ok(d.by_cashier.some((x) => x.name === 'Cajera Rosa López'));
+  assert.ok(d.by_grade.some((g) => g.name === '3° A' && g.total_cents > 0), 'ventas por grado');
+  assert.ok(d.by_category.some((c) => c.qty > 0 && c.name), 'ventas por categoría');
+  assert.ok(Array.isArray(d.inventory));
+  assert.equal(d.inventory_low, d.inventory.filter((p) => p.low_stock).length);
   assert.equal(d.school_name, S.db.get('SELECT name FROM schools WHERE id = 1').name);
   const wk = await rpc('report', { from: '2026-01-01', to: '2026-01-07' }, A); assert.equal(wk.data.sales_by_day.length, 7);
   assert.equal((await rpc('report', { from: '2026-02-10', to: '2026-02-01' }, A)).status, 400);
@@ -172,6 +176,8 @@ test('reportes: totales por rango, por día, más vendidos, por cajero, rechazad
   const c = (await rpc('report', { from: '2020-01-01', to: '2030-01-01' }, C)).data;
   assert.equal(c.from, ymd); assert.equal(c.to, ymd); assert.equal(c.only_cashier, 'Cajera Rosa López');
   assert.ok(c.by_cashier.every((x) => x.name === 'Cajera Rosa López'));
+  assert.equal(c.inventory, null, 'el cajero no lleva el inventario de la escuela');
+  assert.ok(Array.isArray(c.by_grade) && Array.isArray(c.by_category));
   assert.equal((await rpc('report', {}, M)).status, 403);
   // otra escuela: sus propios datos
   const A2 = await tok('admin2', 'admin123');

@@ -52,8 +52,20 @@ async function createServer(opts = {}) {
     console.warn('[auth] JWT_SECRET no definido: usando secreto de desarrollo guardado en la base.');
   }
   const sync = createSyncServer(db, { legacySync: opts.legacySync !== undefined ? !!opts.legacySync : process.env.LEGACY_SYNC === '1' });
-  const persistence = opts.persistence || (() => ({ mode: opts.dbPath ? 'archivo' : 'memoria' }));
-  const security = createSecurity(db, { svc, sync, persistence });
+  const env = opts.env || process.env;
+  const mailer = opts.mailer || consoleMailer();
+  const basePersistence = opts.persistence || (() => ({ mode: opts.dbPath ? 'archivo' : 'memoria' }));
+  const persistence = () => {
+    const p = basePersistence() || {};
+    return {
+      ...p,
+      mail: typeof mailer.status === 'function' ? mailer.status() : { provider: 'consola', configured: false },
+      backup: opts.backups && typeof opts.backups.status === 'function' ? opts.backups.status() : null,
+    };
+  };
+  const alertEmails = String(env.ALERT_EMAIL || '').split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+  const appUrl = String(opts.appUrl || env.APP_URL || '').replace(/\/$/, '');
+  const security = createSecurity(db, { svc, sync, persistence, mailer, appUrl, alertEmails });
   sync.hooks.onRecharge = (id) => security.inspectRecharge(id);
   // Mensualidad por escuela (avisos, tolerancia y pausa automática)
   const billing = createBilling(db, { security, now: opts.now });
@@ -63,11 +75,11 @@ async function createServer(opts = {}) {
     const r = security.emergencyReset(opts.superadminReset);
     if (r && r.applied) console.warn(`[auth] Contraseña del superadministrador "${r.username}" restablecida con SUPERADMIN_RESET_PASSWORD. Quite la variable cuando ya haya entrado.`);
   }
-  const auth = createAuth(db, svc, { jwtSecret: secret, mailer: opts.mailer || consoleMailer(), appUrl: opts.appUrl || process.env.APP_URL, onChildLinked: (id) => sync.recordChild('child_link', id), security, billing, ...(opts.authOptions || {}) });
+  const auth = createAuth(db, svc, { jwtSecret: secret, mailer, appUrl: appUrl || opts.appUrl || process.env.APP_URL, onChildLinked: (id) => sync.recordChild('child_link', id), security, billing, ...(opts.authOptions || {}) });
 
   // Notificaciones Web Push para padres (opts.pushSender permite simular el envío en pruebas)
   const push = createPush(db, { svc, sender: opts.pushSender, env: opts.env || process.env });
-  const platform = createPlatform(db, { svc, sync, auth, security, billing });
+  const platform = createPlatform(db, { svc, sync, auth, security, billing, appUrl });
   // Bajas de alumnos y papás/tutores con Papelera (administrador de la escuela; el superadmin usa /api/super)
   const removals = createRemovals(db, { security, now: opts.now });
   // Revisión periódica de mensualidades (alertas y pausas aunque nadie entre). También al arrancar.
@@ -185,6 +197,12 @@ async function createServer(opts = {}) {
   app.post('/api/sync/invitations', deviceAuth, (req, res) => send(res, () => auth.invitationsForSchool(req.device.school_id, (req.body || {}).child_uuids, { reuse: true, skipLinked: (req.body || {}).include_linked ? false : true })));
 
   // ----- panel del superadministrador (Zuki Company) -----
+  app.post('/api/super/runBackup', authenticate(), requireRole('superadmin'), (req, res) => send(res, async () => {
+    if (!opts.backups) throw Object.assign(new Error('Los respaldos automáticos no están activos en este servidor'), { code: 'VALIDACION' });
+    const r = await opts.backups.run({ force: true });
+    security.audit(req.user, 'respaldo_creado', { ip: req.ip, severity: 'aviso', details: { archivo: r.last_file, verificado: r.verified, nube: r.remote_error || (r.remote_ok_at ? 'ok' : 'sin_nube') } });
+    return r;
+  }));
   app.post('/api/super/:method', authenticate(), requireRole('superadmin'), (req, res) => send(res, () => platform.handle(req.user, req.params.method, req.body || {}, ctx(req))));
   // Respaldo descargable de toda la base (archivo SQLite)
   app.get('/api/super-backup', authenticate(), requireRole('superadmin'), (req, res) => {

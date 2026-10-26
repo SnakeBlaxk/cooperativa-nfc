@@ -82,11 +82,16 @@
     }
   }
   // Muestra una contraseña UNA sola vez, con botón para copiar
-  function passShownModal(title, user, pass) {
+  function passShownModal(title, user, pass, extra) {
+    const mailNote = extra && extra.emailed
+      ? h('div', { class: 'banner ok small' }, h('span', { class: 'ico' }, '✉️'), h('div', null, 'También se envió al correo ', h('b', null, user.email), '. Cópiela igual, por si el mensaje tarda.'))
+      : h('div', { class: 'banner warn small' }, h('span', { class: 'ico' }, '⚠️'), h('div', null, extra
+        ? 'No se envió por correo (el servidor no tiene correo configurado, o esta cuenta no tiene correo). Cópiela y entréguela en persona.'
+        : 'Se muestra solo esta vez y no se guarda en ningún lado. Cópiela y entréguela a la persona por un medio seguro (en persona o por mensaje privado).'));
     modal(title, h('div', { class: 'form' }, h('p', null, 'Usuario para entrar: ', h('b', null, user.username)),
       h('p', { style: { margin: 0 } }, 'Contraseña:'),
       h('div', { class: 'copyrow' }, h('div', { class: 'bigcode', 'data-pass': '1' }, pass), h('button', { class: 'btn primary', onclick: () => copyText(pass) }, '📋 Copiar')),
-      h('div', { class: 'banner warn small' }, h('span', { class: 'ico' }, '⚠️'), h('div', null, 'Se muestra solo esta vez y no se guarda en ningún lado. Cópiela y entréguela a la persona por un medio seguro (en persona o por mensaje privado).'))),
+      mailNote),
     [{ label: 'Listo, ya la copié', class: 'primary', onClick: () => render() }]);
   }
   const banner = (cls, ico, ...txt) => h('div', { class: 'banner ' + cls }, h('span', { class: 'ico' }, ico), h('div', null, txt));
@@ -836,7 +841,7 @@
     [{ label: 'Cancelar' }, { label: 'Crear cuenta', class: 'primary', onClick: async () => {
       const r = await window.coop.auth.createTutor({ full_name: name.value, email: email.value || null, phone: phone.value || null });
       if (!r.ok) { toast(r.error, 'err'); return false; }
-      passShownModal('Cuenta creada', r.data.user, r.data.temporary_password);
+      passShownModal('Cuenta creada', r.data.user, r.data.temporary_password, r.data);
     } }]);
   }
 
@@ -937,7 +942,9 @@
   function drawReportCanvas(r, corte) {
     const W = 1240; const M = 70; const cw = W - 2 * M;
     const rowsTop = Math.min(r.top_products.length, 10); const rowsCash = r.by_cashier.length; const rowsRej = Math.min(r.rejected.length, 15);
-    const H = 720 + 380 + (rowsTop + rowsCash + rowsRej + 6) * 34 + 260;
+    const rowsGrade = (r.by_grade || []).length; const rowsCat = (r.by_category || []).length;
+    const rowsInv = r.inventory ? Math.min(r.inventory.length, 15) : 0;
+    const H = 720 + 380 + (rowsTop + rowsCash + rowsRej + rowsGrade + rowsCat + rowsInv + 10) * 34 + 420;
     const c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d');
     const F = (sz, w) => `${w || 400} ${sz}px "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
@@ -993,8 +1000,11 @@
       y += 50;
     };
     table('Productos más vendidos', ['Producto', 'Piezas', 'Total'], r.top_products.slice(0, 10).map((p) => [p.name, p.qty, money(p.total_cents)]), ['l', 'r', 'r']);
+    table('Ventas por grado', ['Grado', 'Ventas', 'Total'], (r.by_grade || []).map((p) => [p.name, p.count, money(p.total_cents)]), ['l', 'r', 'r']);
+    table('Ventas por categoría', ['Categoría', 'Piezas', 'Total'], (r.by_category || []).map((p) => [p.name, p.qty, money(p.total_cents)]), ['l', 'r', 'r']);
     table('Ventas por cajero', ['Cajero', 'Ventas', 'Total'], r.by_cashier.map((p) => [p.name, p.count, money(p.total_cents)]), ['l', 'r', 'r']);
     table('Ventas rechazadas', ['Alumno', 'Fecha', 'Motivo', 'Monto'], r.rejected.slice(0, 15).map((x) => [x.child_name || '—', fmtDate(x.created_at), x.reason || '', money(x.amount_cents)]), ['l', 'l', 'l', 'r']);
+    if (r.inventory) table('Inventario', ['Producto', 'Piezas', 'Mínimo'], r.inventory.slice(0, 15).map((p) => [p.name + (p.low_stock ? ' (bajo)' : ''), p.stock, p.stock_min === null || p.stock_min === undefined ? '—' : p.stock_min]), ['l', 'r', 'r']);
     // recorta el alto sobrante
     const out = document.createElement('canvas'); out.width = W; out.height = Math.min(H, y + 20);
     out.getContext('2d').drawImage(c, 0, 0);
@@ -1048,7 +1058,10 @@
     row('Fecha', 'Ventas MXN', 'Número'); r.sales_by_day.forEach((d) => row(d.date, (d.total_cents / 100).toFixed(2), d.count)); row();
     row('Producto', 'Piezas', 'Total MXN'); r.top_products.forEach((p) => row(p.name, p.qty, (p.total_cents / 100).toFixed(2))); row();
     row('Cajero', 'Ventas', 'Total MXN'); r.by_cashier.forEach((p) => row(p.name, p.count, (p.total_cents / 100).toFixed(2))); row();
+    row('Grado', 'Ventas', 'Total MXN'); (r.by_grade || []).forEach((p) => row(p.name, p.count, (p.total_cents / 100).toFixed(2))); row();
+    row('Categoría', 'Piezas', 'Total MXN'); (r.by_category || []).forEach((p) => row(p.name, p.qty, (p.total_cents / 100).toFixed(2))); row();
     row('Rechazada: fecha', 'Alumno', 'Motivo', 'Monto MXN'); r.rejected.forEach((x) => row(x.created_at, x.child_name, x.reason, (x.amount_cents / 100).toFixed(2)));
+    if (r.inventory) { row(); row('Inventario', 'Piezas', 'Mínimo', 'Por agotarse'); r.inventory.forEach((p) => row(p.name, p.stock, p.stock_min === null || p.stock_min === undefined ? '' : p.stock_min, p.low_stock ? 'sí' : '')); }
     return new Blob(['\ufeff' + L.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   }
   function reportBody(r, corte) {
@@ -1056,19 +1069,26 @@
       h('button', { class: 'btn primary', 'data-dl': 'pdf', onclick: () => { downloadBlob(canvasToPdf(drawReportCanvas(r, corte)), reportFileName(r, corte, 'pdf')); toast('PDF descargado', 'ok'); } }, '⬇ Descargar PDF'),
       h('button', { class: 'btn', 'data-dl': 'png', onclick: () => drawReportCanvas(r, corte).toBlob((b) => { downloadBlob(b, reportFileName(r, corte, 'png')); toast('Imagen descargada', 'ok'); }, 'image/png') }, '🖼 Descargar imagen'),
       h('button', { class: 'btn', 'data-dl': 'csv', onclick: () => downloadBlob(reportCsv(r), reportFileName(r, corte, 'csv')) }, '⬇ Excel (CSV)'));
-    const tbl = (heads, rows, empty) => (rows.length ? h('table', null, h('tr', null, heads.map(([t, right]) => h('th', { class: right ? 'right' : '' }, t))), rows.map((cells) => h('tr', null, cells.map((v, i) => h('td', { class: heads[i][1] ? 'right' : '' }, v)))))
+    const tbl = (heads, rows, empty) => (rows.length ? h('table', { class: 'resp' }, h('tr', { class: 'head' }, heads.map(([t, right]) => h('th', { class: right ? 'right' : '' }, t))), rows.map((cells) => h('tr', null, cells.map((v, i) => h('td', { class: heads[i][1] ? 'right' : '', 'data-label': heads[i][0] }, v)))))
       : h('div', { class: 'empty' }, empty || 'Sin datos en este periodo'));
+    const gradeCard = h('div', { class: 'card' }, h('h2', null, 'Ventas por grado'), tbl([['Grado'], ['Ventas', 1], ['Total', 1]], (r.by_grade || []).map((p) => [p.name, p.count, money(p.total_cents)])));
+    const catCard = h('div', { class: 'card' }, h('h2', null, 'Ventas por categoría'), tbl([['Categoría'], ['Piezas', 1], ['Total', 1]], (r.by_category || []).map((p) => [p.name, p.qty, money(p.total_cents)])));
+    const invCard = r.inventory ? h('div', { class: 'card', style: { marginTop: '20px' } }, h('h2', null, 'Inventario'),
+      h('p', { class: 'small muted' }, r.inventory_low ? `${r.inventory_low} producto(s) en el mínimo o por debajo.` : 'Existencias de los productos que llevan control.'),
+      tbl([['Producto'], ['Categoría'], ['Piezas', 1], ['Mínimo', 1]], r.inventory.map((p) => [p.low_stock ? p.name + ' · por agotarse' : p.name, p.category || '—', p.stock, p.stock_min === null || p.stock_min === undefined ? '—' : p.stock_min]), 'Ningún producto tiene existencias registradas. En Productos puede anotar piezas y un mínimo.')) : null;
     return h('div', { class: 'report' },
       h('div', { class: 'card row report-head', style: { marginBottom: '16px', justifyContent: 'space-between', flexWrap: 'wrap' } },
         h('div', null, h('h2', { style: { margin: 0 } }, r.school_name || 'Su escuela'), h('div', { class: 'muted' }, `${reportTitle(r, corte)} · ${rangeText(r)}`, r.only_cashier ? ` · ${r.only_cashier}` : '')), actions),
       h('div', { class: 'grid g4' }, statCard('Ventas', money(r.sales_cents), `${r.sales_count} ventas`), statCard('Ticket promedio', money(r.avg_ticket_cents)),
         statCard('Recargas', money(r.recharges_cents), r.refunds_count ? `${r.recharges_count} recargas · reembolsos por baja: ${money(r.refunds_cents)}` : `${r.recharges_count} recargas`), statCard('Ventas rechazadas', String(r.rejected_count), r.cancelled_count ? `${r.cancelled_count} canceladas (${money(r.cancelled_cents)})` : 'Por límites, saldo, prohibiciones o existencias')),
       h('div', { class: 'card chart', style: { marginTop: '20px' } }, h('h2', null, 'Ventas por día'), barChart(r.sales_by_day)),
-      h('div', { class: 'grid g2', style: { marginTop: '20px' } },
+      h('div', { class: 'report-grid', style: { marginTop: '20px' } },
         h('div', { class: 'card' }, h('h2', null, 'Productos más vendidos'), tbl([['Producto'], ['Piezas', 1], ['Total', 1]], r.top_products.map((p) => [p.name, p.qty, money(p.total_cents)]))),
-        h('div', { class: 'card' }, h('h2', null, 'Ventas por cajero'), tbl([['Cajero'], ['Ventas', 1], ['Total', 1]], r.by_cashier.map((p) => [p.name, p.count, money(p.total_cents)])))),
+        h('div', { class: 'card' }, h('h2', null, 'Ventas por cajero'), tbl([['Cajero'], ['Ventas', 1], ['Total', 1]], r.by_cashier.map((p) => [p.name, p.count, money(p.total_cents)]))),
+        gradeCard, catCard),
       h('div', { class: 'card', style: { marginTop: '20px' } }, h('h2', null, 'Ventas rechazadas'),
-        tbl([['Fecha'], ['Alumno'], ['Motivo'], ['Monto', 1]], r.rejected.map((x) => [fmtDate(x.created_at), x.child_name || '—', x.reason || '', money(x.amount_cents)]), 'No hubo ventas rechazadas')));
+        tbl([['Fecha'], ['Alumno'], ['Motivo'], ['Monto', 1]], r.rejected.map((x) => [fmtDate(x.created_at), x.child_name || '—', x.reason || '', money(x.amount_cents)]), 'No hubo ventas rechazadas')),
+      invCard);
   }
   VIEWS.reportes = async (main, params) => {
     const preset = params.p || 'hoy';
@@ -1079,7 +1099,9 @@
       .map(([k, l]) => h('button', { class: 'btn' + (k === preset ? ' active' : ''), onclick: () => go('reportes', { p: k }) }, l)),
     h('button', { class: 'btn ok', style: { marginLeft: 'auto' }, onclick: () => go('reportes', { p: 'hoy', corte: 1 }) }, '🧮 Corte del día'));
     const custom = preset === 'personalizado' ? h('div', { class: 'card filters' }, field('Desde', from), field('Hasta', to), h('button', { class: 'btn primary', onclick: () => go('reportes', { p: 'personalizado', from: from.value, to: to.value }) }, 'Ver reporte')) : null;
-    put(main, pageHead(corte ? 'Corte del día' : 'Reportes', 'Ventas, recargas y rechazos del periodo. Descárguelo en PDF o como imagen para imprimir o enviar.'), tabs, custom);
+    put(main, pageHead(corte ? 'Corte del día' : 'Reportes', corte
+      ? 'Ventas de hoy, por grado y por categoría. En el celular las tablas se acomodan solas. Descárguelo en PDF, imagen o Excel.'
+      : 'Ventas, recargas, rechazos, grado, categoría e inventario del periodo. En el celular las tablas se acomodan solas. Descárguelo en PDF, imagen o Excel.'), tabs, custom);
     const r = await call('report', rg);
     main.appendChild(reportBody(r, corte));
   };
@@ -1402,7 +1424,7 @@
     return h('table', { class: 'resp' + (extraClass ? ' ' + extraClass : '') }, h('tr', { class: 'head' }, headers.map((x) => h('th', { class: x.right ? 'right' : '' }, x.label))),
       rows.map((cells, r) => h('tr', { class: rowClass ? rowClass(r) || null : null }, cells.map((c, i) => h('td', { 'data-label': headers[i].label, class: headers[i].right ? 'right' : '' }, c)))));
   }
-  const tempPassModal = (title, user, pass) => passShownModal(title, user, pass);
+  const tempPassModal = (title, user, pass, extra) => passShownModal(title, user, pass, extra);
   function schoolForm(s) {
     const name = h('input', { value: s ? s.name : '', placeholder: 'p. ej. Colegio Juárez Morelia' });
     // El estado de una escuela existente se cambia en el recuadro "Mensualidad"; aquí solo al crearla
@@ -1426,7 +1448,7 @@
     [{ label: 'Cancelar' }, { label: 'Crear escuela', class: 'primary', onClick: async () => {
       try {
         const r = await superCall('createSchool', { ...f.data(), admin_username: au.value, admin_full_name: an.value || undefined, admin_email: ae.value || undefined });
-        tempPassModal(`Escuela "${r.school.name}" creada`, r.admin.user, r.admin.temporary_password);
+        tempPassModal(`Escuela "${r.school.name}" creada`, r.admin.user, r.admin.temporary_password, r.admin);
       } catch (e) { toast(e.message, 'err'); return false; }
     } }]);
   }
@@ -1554,7 +1576,7 @@
       const u = h('input', { autocomplete: 'off' }); const n = h('input'); const e = h('input', { type: 'email', placeholder: 'Opcional' });
       modal('Nuevo usuario de la escuela', h('div', { class: 'form' }, field('Rol', role), field('Usuario para entrar', u), field('Nombre completo', n), field('Correo', e)),
         [{ label: 'Cancelar' }, { label: 'Crear', class: 'primary', onClick: async () => {
-          try { const r = await superCall('createStaff', { school_id: s.id, role: role.value, username: u.value, full_name: n.value, email: e.value || undefined }); tempPassModal('Usuario creado', r.user, r.temporary_password); } catch (er) { toast(er.message, 'err'); return false; }
+          try { const r = await superCall('createStaff', { school_id: s.id, role: role.value, username: u.value, full_name: n.value, email: e.value || undefined }); tempPassModal('Usuario creado', r.user, r.temporary_password, r); } catch (er) { toast(er.message, 'err'); return false; }
         } }]);
     };
     const resetPass = (u) => setPasswordModal(u);
@@ -1787,7 +1809,7 @@
       h('p', { class: 'small muted' }, 'Las contraseñas están cifradas y nadie puede verlas, ni siquiera usted. Aquí puede asignar una nueva: la persona deberá usarla para entrar y se cerrarán sus sesiones abiertas.'),
       field('Contraseña nueva (opcional)', own, 'Mínimo 8 caracteres. Si la deja vacía se crea una segura de 12 caracteres.')),
     [{ label: 'Cancelar' }, { label: 'Asignar contraseña', class: 'primary', onClick: async () => {
-      try { const r = await superCall('setPassword', { user_id: u.id, password: own.value.trim() || undefined }); passShownModal('Contraseña asignada', r.user, r.password); } catch (e) { toast(e.message, 'err'); return false; }
+      try { const r = await superCall('setPassword', { user_id: u.id, password: own.value.trim() || undefined }); passShownModal('Contraseña asignada', r.user, r.password, r); } catch (e) { toast(e.message, 'err'); return false; }
     } }]);
   }
   // Editar cualquier cuenta (superadministrador): datos, jerarquía, escuela y alumnos del padre/tutor
@@ -1926,6 +1948,15 @@
       } catch (e) { toast(e.message, 'err'); return false; }
     } }]);
   }
+  function backupBlurb(P) {
+    const B = P.backup || {};
+    const when = B.last_at ? since(B.last_at) : 'todavía no hay';
+    const ver = B.verified ? 'La última copia se abrió bien (no está dañada).' : (B.verify_error ? 'No se pudo comprobar la copia: ' + B.verify_error : 'Aún no se comprueba.');
+    let nube = 'Sin copia en otra nube. Para tenerla: BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET, BACKUP_S3_REGION, BACKUP_S3_ACCESS_KEY_ID y BACKUP_S3_SECRET_ACCESS_KEY.';
+    if (B.remote) nube = B.remote_error ? 'La nube rechazó la copia: ' + B.remote_error : (B.remote_ok_at ? `Copia en la nube (${B.remote_bucket || 'S3'}) ${since(B.remote_ok_at)}.` : 'Copia en la nube pendiente.');
+    const temporal = P.mode === 'temporal' && !B.remote_ok_at ? ' En este servidor la copia local se borra si se reinicia.' : '';
+    return `Último respaldo: ${when}. ${ver} ${nube}${temporal}`;
+  }
   VIEWS.seguridad = async (main) => {
     const o = await superCall('securityOverview');
     const set = async (s, k, v, msg) => { if (await safe(() => superCall('setSchoolSecurity', { school_id: s.id, [k]: v }))) { toast(msg, 'ok'); render(); } };
@@ -1950,6 +1981,19 @@
             if (!window.coop.downloadBackup) return toast('Disponible solo en la versión web', 'err');
             const r = await window.coop.downloadBackup(); if (r.ok) toast('Respaldo descargado: ' + r.data.name, 'ok'); else toast(r.error, 'err');
           } }, '⬇ Descargar respaldo')),
+        P.backup ? h('div', { class: 'switchrow' }, h('div', { class: 'grow' }, h('b', null, 'Respaldo automático'), h('div', { class: 'small muted' }, backupBlurb(P))),
+          h('button', { class: 'btn', onclick: async () => {
+            if (!window.coop.runBackup) return toast('Disponible solo en la versión web', 'err');
+            toast('Creando respaldo…');
+            const r = await window.coop.runBackup();
+            if (!r.ok) return toast(r.error, 'err');
+            toast(r.data.verified ? 'Respaldo creado y verificado' : 'No se pudo comprobar la copia', r.data.verified ? 'ok' : 'err');
+            render();
+          } }, 'Crear respaldo ahora')) : null,
+        P.mail ? h('div', { class: 'switchrow' }, h('div', { class: 'grow' }, h('b', null, 'Correo'), h('div', { class: 'small muted' }, P.mail.configured
+          ? `Envío real por ${P.mail.provider} (${P.mail.from}). Las contraseñas nuevas y las alertas altas salen por correo.`
+          : 'Todavía no hay correo real. En el servidor defina RESEND_API_KEY y MAIL_FROM. Mientras tanto la contraseña solo se muestra en pantalla.')),
+          h('span', { class: P.mail.configured ? 'state-off' : 'state-on' }, P.mail.configured ? 'ACTIVO' : 'SIN CONFIGURAR')) : null,
         h('div', { class: 'switchrow' }, h('div', { class: 'grow' }, h('b', null, 'Dónde se guardan los datos'),
           h('div', { class: 'small muted' }, P.mode === 'temporal' ? 'TEMPORAL: los datos se borran cuando el servidor se reinicia. Configure Turso o un disco antes de usarlo con una escuela real (ver guía).'
             : P.mode === 'turso' ? `Copia en Turso (nube). Última copia: ${P.last_ok_at ? since(P.last_ok_at) : 'pendiente'}${P.last_error ? ' · Error: ' + P.last_error : ''}`

@@ -159,6 +159,7 @@
     startWebNfc,
     backup: async () => ({ ok: false, error: 'Los respaldos del servidor se hacen en el servidor (ver README)' }),
     // Descarga del respaldo completo de la base (solo superadministrador)
+    runBackup: () => authed('/api/super/runBackup', {}),
     downloadBackup: async () => {
       if (!access) await refresh();
       const get = () => fetch('/api/super-backup', { headers: { Authorization: 'Bearer ' + access } });

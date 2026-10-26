@@ -202,7 +202,7 @@ docs/capturas/     Capturas de pantalla
 - **Cambio obligatorio de contraseña** (solo superadmin con `SUPERADMIN_FORCE_CHANGE=1`): con `must_change_password` solo se permiten `/api/auth/me`, `/api/auth/change-password` y `/api/auth/logout*`; el resto responde 403 `DEBE_CAMBIAR_PASSWORD`.
 - **Cerrar sesión** (revoca el refresh token) y **cerrar sesión en todos los dispositivos** (revoca todos e incrementa `token_version`, lo que invalida de inmediato los JWT emitidos). Cambiar o restablecer la contraseña, o desactivar al usuario, también invalida sesiones.
 - **Recuperación de contraseña por correo: desactivada** (`/api/auth/forgot` y `/api/auth/reset` responden 403). Quien olvide su contraseña pide una nueva al superadministrador (*Cuentas → Contraseña*). El código sigue disponible con `createServer({ allowSelfReset: true })`.
-- **Envío real de correo/SMS**: el *mailer* es enchufable (`src/core/auth.js → consoleMailer`). En desarrollo **solo imprime el mensaje en la consola del servidor**. Para producción implemente un objeto `{ send({ to, channel, subject, text }) }` con un proveedor como **Resend**, **SendGrid** o **Amazon SES** (correo) o **Twilio** (SMS/WhatsApp) y páselo en `createServer({ mailer })`.
+- **Correo real (Resend)**: con `RESEND_API_KEY` y `MAIL_FROM` el servidor envía la contraseña al crear un tutor, un administrador o un cajero, y al asignar una contraseña nueva, si esa cuenta tiene correo. La contraseña **también se muestra una sola vez** en pantalla. Las alertas de gravedad alta o crítica se envían a `ALERT_EMAIL` y al correo de los superadministradores. Sin esas variables, el mensaje solo se imprime en la consola (desarrollo) y no se envía. El SMS/WhatsApp sigue pendiente. La recuperación de contraseña por correo sigue desactivada.
 - Roles **admin / cajero / tutor** verificados en cada endpoint (middleware + validación en el servicio; el tutor solo ve a sus hijos).
 - Encabezados `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`; CSP estricta en la PWA. El refresh token se guarda en `localStorage` (mitigado por la CSP sin scripts externos); ver `PENDIENTES.md` para migrarlo a cookie `HttpOnly`.
 
@@ -219,7 +219,10 @@ docs/capturas/     Capturas de pantalla
 | `SUPERADMIN_FORCE_CHANGE=1` | Opcional: obliga al superadmin recién creado a cambiar su contraseña al entrar. |
 | `SUPERADMIN_RESET_PASSWORD` | **Recuperación de emergencia** (ver §4b): al arrancar, pone esta contraseña al superadmin, lo reactiva y desbloquea. Se aplica una sola vez por valor; quítela después de entrar. |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Guardado permanente **gratis** en Turso (ver §8). |
-| `BACKUP_DIR` | Carpeta de copias diarias cuando la base está en disco permanente (por defecto junto a la base; se guardan 14). |
+| `RESEND_API_KEY`, `MAIL_FROM` | Correo real. `MAIL_FROM` es un remitente verificado en Resend, por ejemplo `Zuki Pay <avisos@zuki.mx>`. |
+| `ALERT_EMAIL` | Correos (separados por coma) que reciben alertas altas y críticas. También se usa el correo guardado en la cuenta del superadministrador. |
+| `BACKUP_DIR` | Carpeta de copias locales (por defecto junto a la base). Cada corrida actualiza la de hoy y `ultimo.db`, conserva 14 días y **abre la copia** para comprobar que no está dañada. |
+| `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_REGION`, `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY` | Copia en Amazon S3 o Backblaze B2 (API compatible). Opcional: `BACKUP_S3_PREFIX` (por defecto `zuki-pay/`). |
 | `TZ` | Zona horaria (por defecto `America/Mexico_City`); se usa para el horario escolar y los cortes por día. |
 | `ADMIN_USER`, `ADMIN_PASSWORD`, `SCHOOL_NAME` | Opcional: crea una primera escuela con su administrador. Normalmente las escuelas se crean desde el panel del superadmin. |
 | `TRUST_PROXY=1` | Detrás de un proxy (Render, Railway, Nginx) para que el límite por IP use la IP real |
@@ -360,7 +363,7 @@ El servidor es Node + SQLite (sql.js, en memoria con escritura a archivo). Al ar
 |---|---|---|---|
 | **temporal** | `DB_PATH` en `/tmp` sin Turso (situación actual en Render gratis) | 0 | **Se pierde todo** en cada reinicio o despliegue. Solo para demostraciones. |
 | **turso** | `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` | 0 (plan gratis de Turso) | Al arrancar descarga la última copia; tras cada cambio sube una copia comprimida (en ≤ 3–15 s) y al apagarse. Conserva la copia anterior. Riesgo: si el servidor se cae en esos segundos, se pierde lo último. |
-| **disco** | `DB_PATH=/var/data/servidor.db` con un *Persistent Disk* | Render Starter 7 USD/mes + disco ~0.25 USD/GB/mes | Lo más robusto. Copia diaria automática (14 días) en `BACKUP_DIR`. Sin "dormirse". |
+| **disco** | `DB_PATH=/var/data/servidor.db` con un *Persistent Disk* | Render Starter 7 USD/mes + disco ~0.25 USD/GB/mes | Lo más robusto. Copia automática (14 días) en `BACKUP_DIR`, más la nube si configuró S3/Backblaze. Sin "dormirse". |
 
 **Recomendación**: para una prueba piloto, Turso gratis. Para una escuela cobrando en serio, Render **Starter + disco 1 GB** (≈ 7.25 USD/mes): el plan gratis de Render se **duerme tras 15 min sin visitas** (la primera carga tarda ~1 min) y eso no sirve para una caja.
 

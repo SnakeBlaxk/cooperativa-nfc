@@ -29,7 +29,14 @@ function consoleMailer(log = console.log) {
   const outbox = [];
   return {
     outbox,
-    async send(msg) { outbox.push(msg); log(`[mailer:dev] Para: ${msg.to} | ${msg.subject}\n${msg.text}`); },
+    provider: 'consola',
+    configured: false,
+    status() { return { provider: 'consola', configured: false, from: null }; },
+    async send(msg) {
+      outbox.push(msg);
+      log(`[mailer:dev] Para: ${msg.to} | ${msg.subject}\n${msg.text}`);
+      return { ok: true, skipped: true, reason: 'consola' };
+    },
   };
 }
 
@@ -223,9 +230,9 @@ function createAuth(db, svc, opts = {}) {
     if (Array.isArray(data.child_ids)) {
       for (const cid of data.child_ids) { svc.updateChild(actor, cid, { tutor_id: u.id }); onChildLinked(Number(cid)); }
     }
-    await mailer.send({ to: u.email || u.phone, channel: u.email ? 'email' : 'sms', subject: 'Tu cuenta de Zuki Pay',
-      text: `Hola ${u.full_name}. Tu usuario es ${u.username} y tu contraseña temporal es ${password}. Entra en ${appUrl}. Guárdala en un lugar seguro; si la olvidas, pide una nueva a la escuela.` });
-    return { user: u, temporary_password: password };
+    const { deliverPassword } = require('./mailer');
+    const emailed = await deliverPassword(mailer, u, password, { appUrl });
+    return { user: u, temporary_password: password, emailed };
   }
 
   // ----- invitaciones (código por alumno/tarjeta) -----

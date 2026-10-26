@@ -1005,11 +1005,25 @@ function createService(db, opts = {}) {
       WHERE ${SALE}${W} GROUP BY 1 ORDER BY total_cents DESC`, [a, b]);
     const rejected = db.all(`SELECT t.id, t.created_at, t.reason, t.amount_cents, COALESCE(ch.full_name, t.child_name) AS child_name FROM transactions t LEFT JOIN children ch ON ch.id = t.child_id
       WHERE t.type='compra' AND t.status='rechazado'${W} ORDER BY t.id DESC LIMIT 50`, [a, b]);
+    const byGrade = db.all(`SELECT COALESCE(NULLIF(TRIM(ch.grade), ''), 'Sin grado') AS name, COUNT(*) AS count, SUM(t.amount_cents) AS total_cents
+      FROM transactions t LEFT JOIN children ch ON ch.id = t.child_id WHERE ${SALE}${W} GROUP BY 1 ORDER BY total_cents DESC`, [a, b]);
+    const byCategory = db.all(`SELECT COALESCE(NULLIF(TRIM(ti.category_name), ''), 'Sin categoría') AS name, SUM(ti.qty) AS qty, SUM(ti.subtotal_cents) AS total_cents
+      FROM transaction_items ti JOIN transactions t ON t.id = ti.transaction_id WHERE ${SALE}${W} GROUP BY 1 ORDER BY total_cents DESC`, [a, b]);
+    let inventory = null;
+    if (actor.role === 'admin') {
+      inventory = db.all(`SELECT p.name, c.name AS category, p.stock, p.stock_min FROM products p JOIN categories c ON c.id = p.category_id
+        WHERE p.deleted_at IS NULL AND p.active = 1 AND p.stock IS NOT NULL AND p.school_id = ? ORDER BY p.stock ASC, p.name LIMIT 40`, [sid]).map((p) => ({
+        name: p.name, category: p.category, stock: p.stock, stock_min: p.stock_min,
+        low_stock: p.stock_min !== null && p.stock_min !== undefined && p.stock <= p.stock_min,
+      }));
+    }
     return {
       school_name: schoolName(sid), from, to, only_cashier: userId ? (actor.full_name || actor.username) : null, generated_at: ts(),
       sales_cents: sales.s, sales_count: sales.n, avg_ticket_cents: sales.n ? Math.round(sales.s / sales.n) : 0,
       recharges_cents: rech.s, recharges_count: rech.n, rejected_count: rej.n, rejected_cents: rej.s, cancelled_count: canc.n, cancelled_cents: canc.s, refunds_count: refunds.n, refunds_cents: refunds.s,
       sales_by_day: days, top_products: top, by_cashier: byCashier, rejected,
+      by_grade: byGrade, by_category: byCategory, inventory,
+      inventory_low: inventory ? inventory.filter((p) => p.low_stock).length : 0,
     };
   }
 

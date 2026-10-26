@@ -4,13 +4,16 @@
 //            SUPERADMIN_USER, SUPERADMIN_PASSWORD (dueño de la plataforma; se crea si no existe),
 //            SUPERADMIN_FORCE_CHANGE=1 (obliga a cambiarla al entrar), SUPERADMIN_RESET_PASSWORD (recuperación de emergencia),
 //            ADMIN_USER, ADMIN_PASSWORD, SCHOOL_NAME (primera escuela, opcional),
-//            TURSO_DATABASE_URL + TURSO_AUTH_TOKEN (persistencia gratis en Turso), BACKUP_DIR (copias diarias en modo disco),
+//            TURSO_DATABASE_URL + TURSO_AUTH_TOKEN (persistencia gratis en Turso), BACKUP_DIR (copias locales),
+//            BACKUP_S3_ENDPOINT + BACKUP_S3_BUCKET + BACKUP_S3_REGION + BACKUP_S3_ACCESS_KEY_ID + BACKUP_S3_SECRET_ACCESS_KEY (copia en S3 o Backblaze),
+//            RESEND_API_KEY + MAIL_FROM (correo real), ALERT_EMAIL (avisos al superadministrador),
 //            LEGACY_SYNC=1 (solo para migrar cajas 1.x: acepta temporalmente su envío de ventas sin conexión)
 process.env.TZ = process.env.TZ || 'America/Mexico_City'; // horas de la escuela (México), también en Render
 const path = require('path');
 const fs = require('fs');
 const { createServer } = require('./app');
-const { createTursoStore, createReplicator, dailyFileBackups, persistenceMode } = require('./persist');
+const { createTursoStore, createReplicator, persistenceMode, createBackupService, s3TargetFromEnv } = require('./persist');
+const { createMailer } = require('../src/core/mailer');
 const { openDatabase } = require('../src/core/db');
 
 (async () => {
@@ -35,10 +38,14 @@ const { openDatabase } = require('../src/core/db');
   const superadminReset = process.env.SUPERADMIN_RESET_PASSWORD ? { username: process.env.SUPERADMIN_USER || null, password: process.env.SUPERADMIN_RESET_PASSWORD } : null;
   const bootstrapAdmin = process.env.ADMIN_PASSWORD ? { username: process.env.ADMIN_USER || 'admin', password: process.env.ADMIN_PASSWORD } : null;
   if (store) replicator = createReplicator(db, store);
+  const mailer = createMailer(process.env);
+  const backupDir = process.env.BACKUP_DIR || path.join(path.dirname(dbPath), 'respaldos');
+  const remote = s3TargetFromEnv(process.env);
+  const backups = createBackupService(db, { dir: backupDir, remote: remote ? { ...remote } : null });
   const persistence = () => ({ mode, ...(replicator ? { last_ok_at: replicator.state.last_ok_at, last_error: replicator.state.last_error, bytes: replicator.state.last_bytes } : {}) });
-  const { app } = await createServer({ db, dbPath, seed: seedDemo, bootstrapSuperadmin, superadminReset, bootstrapAdmin, bootstrapSchoolName: process.env.SCHOOL_NAME, persistence });
+  const { app } = await createServer({ db, dbPath, seed: seedDemo, bootstrapSuperadmin, superadminReset, bootstrapAdmin, bootstrapSchoolName: process.env.SCHOOL_NAME, persistence, mailer, backups });
   if (replicator) await replicator.flush(); // primera copia (incluye lo creado al arrancar)
-  if (mode === 'disco') dailyFileBackups(db, process.env.BACKUP_DIR || path.join(path.dirname(dbPath), 'respaldos'));
+  try { await backups.run(); } catch (e) { console.error('[respaldo]', e.message); }
   const port = Number(process.env.PORT || 3000);
   const server = app.listen(port, () => console.log(`Servidor Zuki Pay en http://localhost:${port}  (base: ${dbPath}, persistencia: ${mode})`));
   // Al apagar (Render envía SIGTERM al reiniciar o dormir) se sube la última copia
@@ -48,6 +55,7 @@ const { openDatabase } = require('../src/core/db');
     console.log(`[servidor] ${sig}: guardando y cerrando…`);
     server.close();
     try { if (replicator) await Promise.race([replicator.flush(), new Promise((r) => setTimeout(r, 20000))]); } catch (_) { /* ya registrado */ }
+    try { await Promise.race([backups.run(), new Promise((r) => setTimeout(r, 15000))]); } catch (_) { /* la copia anterior sigue en disco */ }
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
