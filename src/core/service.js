@@ -107,7 +107,7 @@ function createService(db, opts = {}) {
   }
   function publicUser(u) {
     if (!u) return null;
-    return { id: u.id, username: u.username, role: u.role, full_name: u.full_name, phone: u.phone, email: u.email, active: !!u.active, must_change_password: !!u.must_change_password,
+    return { id: u.id, username: u.username, role: u.role, full_name: u.full_name, phone: u.phone, whatsapp: u.whatsapp || null, whatsapp_effective: u.whatsapp || u.phone || null, email: u.email, active: !!u.active, must_change_password: !!u.must_change_password,
       school_id: u.school_id === undefined ? null : u.school_id, school_name: schoolName(u.school_id), school_uuid: schoolRow(u.school_id).uuid || null, school_type: schoolRow(u.school_id).account_type || 'escuela' };
   }
 
@@ -165,13 +165,15 @@ function createService(db, opts = {}) {
     const phone = data.phone ? normPhone(data.phone) : null;
     if (data.phone && !phone) throw new AppError('Teléfono inválido (10 dígitos)', 'VALIDACION');
     // Si no se indica usuario, se usa el correo o el teléfono como identificador
+    const whatsapp = data.whatsapp ? normPhone(data.whatsapp) : null;
+    if (data.whatsapp && !whatsapp) throw new AppError('WhatsApp inválido (10 dígitos)', 'VALIDACION');
     const username = str(data.username || email || phone, 'usuario', { min: 3, max: 80 });
     if (!/^[a-zA-Z0-9._@+-]+$/.test(username)) throw new AppError('El usuario solo puede tener letras, números y . _ - @', 'VALIDACION');
     const password = str(data.password, 'contraseña', { min: 6, max: 100 });
     const full_name = str(data.full_name, 'nombre', { max: 120 });
     assertUniqueIdentity(username, email, phone);
-    const r = db.run('INSERT INTO users (username,password_hash,role,full_name,phone,email,must_change_password,school_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-      [username, bcrypt.hashSync(password, 10), role, full_name, phone, email, 0, sch(actor), ts()]);
+    const r = db.run('INSERT INTO users (username,password_hash,role,full_name,phone,whatsapp,email,must_change_password,school_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      [username, bcrypt.hashSync(password, 10), role, full_name, phone, whatsapp, email, 0, sch(actor), ts()]);
     return publicUser(db.get('SELECT * FROM users WHERE id = ?', [r.lastId]));
   }
   function assertUniqueIdentity(username, email, phone, exceptId = 0) {
@@ -186,11 +188,13 @@ function createService(db, opts = {}) {
     const full_name = data.full_name !== undefined ? str(data.full_name, 'nombre') : u.full_name;
     const phone = data.phone !== undefined ? (data.phone ? normPhone(data.phone) : null) : u.phone;
     if (data.phone && !phone) throw new AppError('Teléfono inválido (10 dígitos)', 'VALIDACION');
+    const whatsapp = data.whatsapp !== undefined ? (data.whatsapp ? normPhone(data.whatsapp) : null) : (u.whatsapp || null);
+    if (data.whatsapp && !whatsapp) throw new AppError('WhatsApp inválido (10 dígitos)', 'VALIDACION');
     const email = data.email !== undefined ? (data.email ? normEmail(data.email) : null) : u.email;
     assertUniqueIdentity(null, email, phone, u.id);
     const active = data.active !== undefined ? (data.active ? 1 : 0) : u.active;
     if (u.id === actor.id && !active) throw new AppError('No puedes desactivar tu propio usuario', 'VALIDACION');
-    db.run('UPDATE users SET full_name=?, phone=?, email=?, active=? WHERE id=?', [full_name, phone, email, active, u.id]);
+    db.run('UPDATE users SET full_name=?, phone=?, whatsapp=?, email=?, active=? WHERE id=?', [full_name, phone, whatsapp, email, active, u.id]);
     if (data.password) throw new AppError('Solo el administrador de la plataforma (Zuki Company) puede cambiar contraseñas.', 'PROHIBIDO');
     if (!active) db.run('UPDATE users SET token_version = token_version + 1 WHERE id = ?', [u.id]);
     return publicUser(db.get('SELECT * FROM users WHERE id = ?', [u.id]));

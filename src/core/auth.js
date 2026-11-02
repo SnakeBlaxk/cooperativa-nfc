@@ -219,7 +219,7 @@ function createAuth(db, svc, opts = {}) {
     if (!actor || actor.role !== 'admin') throw new AppError('No tienes permiso para esta acción', 'PROHIBIDO');
     if (!data.email && !data.phone) throw new AppError('Indica correo o teléfono del tutor', 'VALIDACION');
     const password = tempPassword();
-    const u = svc.createUser(actor, { role: 'tutor', full_name: data.full_name, email: data.email || null, phone: data.phone || null, password });
+    const u = svc.createUser(actor, { role: 'tutor', full_name: data.full_name, email: data.email || null, phone: data.phone || null, whatsapp: data.whatsapp || null, password });
     if (Array.isArray(data.child_ids)) {
       for (const cid of data.child_ids) { svc.updateChild(actor, cid, { tutor_id: u.id }); onChildLinked(Number(cid)); }
     }
@@ -293,7 +293,7 @@ function createAuth(db, svc, opts = {}) {
     const child = db.get('SELECT school_id FROM children WHERE id = ?', [inv.child_id]);
     const system = { id: 0, role: 'admin', school_id: child ? child.school_id : null }; // actor interno para crear la cuenta
     const u = db.transaction(() => {
-      const created = svc.createUser(system, { role: 'tutor', full_name, email, phone, password, must_change_password: false });
+      const created = svc.createUser(system, { role: 'tutor', full_name, email, phone, whatsapp: data.whatsapp || null, password, must_change_password: false });
       linkChild(inv, created.id);
       return created;
     });

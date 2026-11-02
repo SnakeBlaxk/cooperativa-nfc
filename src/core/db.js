@@ -409,6 +409,8 @@ class Database {
     // PENDIENTE (sin lógica): forma de cobro a los clientes de la cuenta: 'mensualidad' | 'por_clase' | NULL.
     // Ver docs/pendientes-cuitswimmer.md. No se usa en ningún cálculo todavía.
     add('schools', 'tipo_pago', 'TEXT');
+    // WhatsApp de la persona (opcional; si está vacío se usa el teléfono). Sin envío de WhatsApp todavía.
+    add('users', 'whatsapp', 'TEXT');
     add('transactions', 'flag_note', 'TEXT');
     // v2.3: bajas con Papelera (borrado lógico de alumnos y papás/tutores) y reembolso al dar de baja
     add('children', 'deleted_at', 'TEXT');

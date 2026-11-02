@@ -30,4 +30,19 @@ Preguntas para el dueño:
 3. Mensualidad: ¿monto fijo, fecha de corte, qué pasa si no se paga?
 4. ¿Se descuenta del saldo de la tarjeta o se paga aparte?
 
-Notificaciones de WhatsApp: no se tocaron.
+## Respuestas del dueño (2 de noviembre de 2026)
+Quiere tres cosas para Cuitswimmer:
+1. **Registro de alumnos (nadadores)**: ya existe (alta de nadadores y padres/tutores).
+2. **Mensualidades**: cobro mensual a los clientes. **Todavía NO implementado** (sin lógica de cobro;
+   `schools.tipo_pago` sigue siendo solo un marcador). Siguen abiertas las preguntas de arriba.
+3. **Avisos por WhatsApp**:
+   - Recordatorios de pago de la mensualidad.
+   - Avisos generales (anuncios de la academia).
+
+## WhatsApp
+- Hecho: campo opcional **WhatsApp** junto a *Teléfono* al registrar/editar padres/tutores y cuentas
+  (registro con código, alta de tutor por el administrador, usuarios y *Cuentas* del superadministrador).
+  Columna nueva `users.whatsapp` (nullable, migración `ALTER TABLE ... ADD COLUMN`, segura con datos
+  existentes y Turso). Si se deja vacío se usa el teléfono (`whatsapp_effective` en la API).
+  Los nadadores no tienen teléfono propio; el contacto es el del padre/tutor.
+- PENDIENTE: **no hay envío de WhatsApp** (ni proveedor, ni plantillas, ni programación de recordatorios).

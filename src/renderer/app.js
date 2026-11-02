@@ -69,6 +69,8 @@
     });
   }
   function field(label, input, hint) { return h('label', null, label, input, hint ? h('span', { class: 'hint' }, hint) : null); }
+  // WhatsApp opcional: si se deja vacío se usa el teléfono (aún no se envían mensajes)
+  function waField(input) { return field('WhatsApp (opcional)', input, 'Si lo dejas vacío, se usa el mismo que el teléfono.'); }
   // Encabezado de página: título grande, explicación corta y botones a la derecha
   function pageHead(title, sub, ...actions) {
     return h('div', { class: 'pagehead' }, h('div', { class: 'titles' }, h('h1', null, title), sub ? h('p', { class: 'sub' }, sub) : null),
@@ -328,16 +330,16 @@
   }
   function renderRegister() {
     const code = h('input', { placeholder: 'COOP-XXXX-XXXX', style: { textTransform: 'uppercase' } }); const name = h('input', { autocomplete: 'name' });
-    const email = h('input', { type: 'email', autocomplete: 'email' }); const phone = h('input', { type: 'tel', autocomplete: 'tel', placeholder: '10 dígitos' });
+    const email = h('input', { type: 'email', autocomplete: 'email' }); const phone = h('input', { type: 'tel', autocomplete: 'tel', placeholder: '10 dígitos' }); const wa = h('input', { type: 'tel', placeholder: 'Mismo que el teléfono' });
     const p1 = h('input', { type: 'password', autocomplete: 'new-password' }); const p2 = h('input', { type: 'password', autocomplete: 'new-password' });
     const msg = h('div', { class: 'small', style: { color: 'var(--err)' } });
     authCard('Crear mi cuenta', h('p', { class: 'tag' }, 'Escriba el código de invitación que le entregó la escuela junto con la tarjeta de su hijo(a).'),
-      field('Código de invitación', code), field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone)),
+      field('Código de invitación', code), field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone)), waField(wa),
       field('Contraseña (mín. 8)', p1), field('Repetir contraseña', p2), msg,
       h('button', { class: 'btn primary lg block', onclick: async () => {
         msg.textContent = '';
         if (p1.value !== p2.value) { msg.textContent = 'Las contraseñas no coinciden'; return; }
-        const r = await window.coop.auth.register({ code: code.value, full_name: name.value, email: email.value || null, phone: phone.value || null, password: p1.value });
+        const r = await window.coop.auth.register({ code: code.value, full_name: name.value, email: email.value || null, phone: phone.value || null, whatsapp: wa.value || null, password: p1.value });
         if (!r.ok) { msg.textContent = r.error; return; }
         state.user = r.data; state.view = null; toast('¡Cuenta creada! Su hijo(a) ya está vinculado.', 'ok'); render();
       } }, 'Crear cuenta'), h('button', { class: 'btn block', onclick: () => go(null) }, 'Volver'));
@@ -854,11 +856,11 @@
   }
   // Alta de tutor con contraseña temporal generada por el servidor (se envía por correo/SMS)
   function tutorTempModal() {
-    const name = h('input'); const email = h('input', { type: 'email' }); const phone = h('input', { type: 'tel', placeholder: '10 dígitos' });
+    const name = h('input'); const email = h('input', { type: 'email' }); const phone = h('input', { type: 'tel', placeholder: '10 dígitos' }); const wa = h('input', { type: 'tel', placeholder: 'Mismo que el teléfono' });
     modal('Nueva cuenta de tutor', h('div', { class: 'form' }, h('p', { class: 'small muted' }, 'Se genera una contraseña automáticamente. El tutor entra con su correo o teléfono.'),
-      field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone))),
+      field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone)), waField(wa)),
     [{ label: 'Cancelar' }, { label: 'Crear cuenta', class: 'primary', onClick: async () => {
-      const r = await window.coop.auth.createTutor({ full_name: name.value, email: email.value || null, phone: phone.value || null });
+      const r = await window.coop.auth.createTutor({ full_name: name.value, email: email.value || null, phone: phone.value || null, whatsapp: wa.value || null });
       if (!r.ok) { toast(r.error, 'err'); return false; }
       passShownModal('Cuenta creada', r.data.user, r.data.temporary_password);
     } }]);
@@ -867,18 +869,18 @@
   function userModal(u, fixedRole) {
     const role = h('select', { disabled: !!u || !!fixedRole }, ['admin', 'cajero', 'tutor'].map((r) => h('option', { value: r, selected: (u ? u.role : fixedRole || 'cajero') === r }, ROLE_LABEL[r])));
     const username = h('input', { value: u ? u.username : '', disabled: !!u });
-    const name = h('input', { value: u ? u.full_name : '' }); const phone = h('input', { value: u ? u.phone || '' : '', type: 'tel' }); const email = h('input', { value: u ? u.email || '' : '', type: 'email' });
+    const name = h('input', { value: u ? u.full_name : '' }); const phone = h('input', { value: u ? u.phone || '' : '', type: 'tel' }); const wa = h('input', { value: u ? u.whatsapp || '' : '', type: 'tel', placeholder: 'Mismo que el teléfono' }); const email = h('input', { value: u ? u.email || '' : '', type: 'email' });
     const pass = h('input', { type: 'password', placeholder: 'Mínimo 6 caracteres', autocomplete: 'new-password' });
     const active = h('input', { type: 'checkbox', checked: u ? u.active : true });
     modal(u ? 'Editar usuario' : 'Nuevo usuario', h('div', { class: 'form' }, field('Puesto', role), field('Usuario (para iniciar sesión)', username), field('Nombre completo', name),
-      h('div', { class: 'grid g2' }, field('Teléfono', phone), field('Correo', email)),
+      h('div', { class: 'grid g2' }, field('Teléfono', phone), field('Correo', email)), waField(wa),
       u ? h('div', { class: 'banner info small' }, h('span', { class: 'ico' }, '🔑'), h('div', null, 'Las contraseñas solo las cambia el administrador de la plataforma (Zuki Company).'))
         : field('Contraseña inicial', pass, 'Désela a la persona. Si la olvida, el administrador de la plataforma le asigna otra.'),
       u ? h('label', { class: 'check' }, active, 'Cuenta activa (puede entrar)') : null),
     [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
       try {
-        if (u) await call('updateUser', { id: u.id, full_name: name.value, phone: phone.value, email: email.value, active: active.checked });
-        else await call('createUser', { role: role.value, username: username.value, full_name: name.value, phone: phone.value, email: email.value, password: pass.value });
+        if (u) await call('updateUser', { id: u.id, full_name: name.value, phone: phone.value, whatsapp: wa.value, email: email.value, active: active.checked });
+        else await call('createUser', { role: role.value, username: username.value, full_name: name.value, phone: phone.value, whatsapp: wa.value, email: email.value, password: pass.value });
         toast('Usuario guardado', 'ok'); render();
       } catch (e) { toast(e.message, 'err'); return false; }
     } }]);
@@ -1824,6 +1826,7 @@
     const user = h('input', { value: acc.username || '', disabled: prot, autocomplete: 'off' });
     const email = h('input', { value: acc.email || '', type: 'email' });
     const phone = h('input', { value: acc.phone || '', type: 'tel', placeholder: '10 dígitos' });
+    const wa = h('input', { value: acc.whatsapp || '', type: 'tel', placeholder: 'Mismo que el teléfono' });
     const role = h('select', { disabled: prot }, (prot ? [['superadmin', 'Superadministrador']] : [['admin', 'Administrador'], ['cajero', 'Cajero'], ['tutor', 'Padre / tutor']])
       .map(([k, l]) => h('option', { value: k, selected: k === acc.role }, l)));
     const school = h('select', { disabled: prot }, h('option', { value: '' }, prot ? 'Toda la plataforma' : '— sin escuela —'), schools.map((s) => h('option', { value: s.id, selected: s.id === acc.school_id }, s.name)));
@@ -1856,10 +1859,10 @@
     modal('Editar cuenta', h('div', { class: 'form' },
       prot ? banner('info', '🛡️', 'Cuenta protegida del superadministrador: solo se pueden cambiar nombre, correo y teléfono.') : null,
       field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Usuario (para entrar)', user), field('Jerarquía', role)),
-      h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone)), field('Escuela', school), prot ? null : kidsWrap,
+      h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone)), waField(wa), field('Escuela', school), prot ? null : kidsWrap,
       h('p', { class: 'small muted' }, 'Si cambia el usuario, la jerarquía o la escuela, la persona deberá volver a entrar. Todo cambio queda en la bitácora.')),
     [{ label: 'Cancelar' }, { label: 'Guardar cambios', class: 'primary', onClick: async () => {
-      const data = { user_id: acc.id, full_name: name.value, email: email.value.trim() || null, phone: phone.value.trim() || null };
+      const data = { user_id: acc.id, full_name: name.value, email: email.value.trim() || null, phone: phone.value.trim() || null, whatsapp: wa.value.trim() || null };
       if (!prot) Object.assign(data, { username: user.value.trim(), role: role.value, school_id: school.value ? Number(school.value) : null, child_ids: role.value === 'tutor' ? kids.map((k) => k.id) : [] });
       try { await superCall('updateAccount', data); toast('Cuenta actualizada', 'ok'); if (onDone) onDone(); } catch (e) { toast(e.message, 'err'); return false; }
     } }]);

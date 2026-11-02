@@ -370,7 +370,7 @@ function createSecurity(db, opts = {}) {
     if (f.status === 'activas') w.push('u.active = 1'); else if (f.status === 'bloqueadas') w.push('(u.active = 0 OR COALESCE(u.locked_until, 0) > ' + Date.now() + ')');
     if (f.q) { w.push('(u.username LIKE ? OR u.full_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)'); const q = '%' + String(f.q).slice(0, 60) + '%'; p.push(q, q, q, q); }
     const ORDER = "CASE u.role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 WHEN 'cajero' THEN 2 ELSE 3 END";
-    return db.all(`SELECT u.id, u.username, u.role, u.full_name, u.email, u.phone, u.active, u.school_id, u.created_at, u.last_login_at, u.last_login_ip, u.locked_until, u.failed_logins, u.password_set_at, u.password_set_by,
+    return db.all(`SELECT u.id, u.username, u.role, u.full_name, u.email, u.phone, u.whatsapp, u.active, u.school_id, u.created_at, u.last_login_at, u.last_login_ip, u.locked_until, u.failed_logins, u.password_set_at, u.password_set_by,
         s.status AS school_status,
         CASE WHEN u.role = 'tutor' THEN COALESCE((SELECT group_concat(DISTINCT s2.name) FROM children c JOIN schools s2 ON s2.id = c.school_id WHERE c.tutor_id = u.id), s.name) ELSE s.name END AS school_name
       FROM users u LEFT JOIN schools s ON s.id = u.school_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY ${ORDER}, school_name, u.full_name LIMIT 2000`, p)
@@ -438,6 +438,8 @@ function createSecurity(db, opts = {}) {
     const email = has('email') ? (data.email ? normEmail(data.email) : null) : u.email;
     const phone = has('phone') ? (data.phone ? normPhone(data.phone) : null) : u.phone;
     if (has('phone') && data.phone && !phone) throw new AppError('Teléfono inválido (10 dígitos)', 'VALIDACION');
+    const whatsapp = has('whatsapp') ? (data.whatsapp ? normPhone(data.whatsapp) : null) : (u.whatsapp || null);
+    if (has('whatsapp') && data.whatsapp && !whatsapp) throw new AppError('WhatsApp inválido (10 dígitos)', 'VALIDACION');
     const role = !isSuper && has('role') ? String(data.role) : u.role;
     if (!isSuper && !['admin', 'cajero', 'tutor'].includes(role)) throw new AppError('Jerarquía inválida (Administrador, Cajero o Padre/tutor)', 'VALIDACION');
     let school_id = !isSuper && has('school_id') ? (data.school_id === null || data.school_id === '' ? null : Number(data.school_id)) : u.school_id;
@@ -462,8 +464,8 @@ function createSecurity(db, opts = {}) {
     const changed = Object.keys(before).filter((k) => String(before[k] ?? '') !== String(after[k] ?? ''));
     const sensitive = changed.some((k) => ['usuario', 'rol', 'escuela'].includes(k));
     db.transaction(() => {
-      db.run(`UPDATE users SET full_name = ?, username = ?, email = ?, phone = ?, role = ?, school_id = ?${sensitive ? ', token_version = token_version + 1' : ''} WHERE id = ?`,
-        [full_name, username, email, phone, role, school_id === undefined ? null : school_id, u.id]);
+      db.run(`UPDATE users SET full_name = ?, username = ?, email = ?, phone = ?, whatsapp = ?, role = ?, school_id = ?${sensitive ? ', token_version = token_version + 1' : ''} WHERE id = ?`,
+        [full_name, username, email, phone, whatsapp, role, school_id === undefined ? null : school_id, u.id]);
       if (sensitive) db.run('UPDATE refresh_tokens SET revoked = 1 WHERE user_id = ?', [u.id]); // vuelve a entrar con sus datos nuevos
       for (const cid of removed) db.run('UPDATE children SET tutor_id = NULL WHERE id = ? AND tutor_id = ?', [cid, u.id]);
       for (const cid of added) db.run('UPDATE children SET tutor_id = ? WHERE id = ?', [u.id, cid]);
