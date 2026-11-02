@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { STATUSES, isYmd } = require('./billing');
 const { createCardStock } = require('./card-stock');
 const { createRemovals } = require('./removals');
+const ACCOUNT_TYPES = ['escuela', 'natacion'];
 function tempPassword() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   const b = crypto.randomBytes(10); let s = '';
@@ -75,7 +76,9 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
       contact_phone = data.contact_phone ? normPhone(data.contact_phone) : null;
       if (data.contact_phone && !contact_phone) throw new AppError('Teléfono inválido (10 dígitos)', 'VALIDACION');
     }
-    return { name, status, plan_note: g('plan_note', 'plan / cuota', { max: 300 }), contact_name: g('contact_name', 'contacto', { max: 120 }), contact_phone, contact_email };
+    let account_type = data.account_type !== undefined ? String(data.account_type || 'escuela') : (prev.account_type || 'escuela');
+    if (!ACCOUNT_TYPES.includes(account_type)) throw new AppError('Tipo de cuenta inválido (escuela o natacion)', 'VALIDACION');
+    return { name, status, account_type, plan_note: g('plan_note', 'plan / cuota', { max: 300 }), contact_name: g('contact_name', 'contacto', { max: 120 }), contact_phone, contact_email };
   }
 
   function makeStaff(sid, data) {
@@ -99,8 +102,8 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
         if (!isYmd(String(data.period_end)) || String(data.period_end) < per.period_start) throw new AppError('Fecha fin inválida', 'VALIDACION');
         per.period_end = String(data.period_end);
       }
-      const sid = db.run('INSERT INTO schools (name, status, plan_note, contact_name, contact_phone, contact_email, created_at, period_start, period_end) VALUES (?,?,?,?,?,?,?,?,?)',
-        [d.name, d.status, d.plan_note, d.contact_name, d.contact_phone, d.contact_email, ts(), per.period_start, per.period_end]).lastId;
+      const sid = db.run('INSERT INTO schools (name, status, account_type, plan_note, contact_name, contact_phone, contact_email, created_at, period_start, period_end) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        [d.name, d.status, d.account_type, d.plan_note, d.contact_name, d.contact_phone, d.contact_email, ts(), per.period_start, per.period_end]).lastId;
       for (const n of DEFAULT_CATEGORIES) db.run('INSERT INTO categories (school_id, name) VALUES (?, ?)', [sid, n]);
       const admin = makeStaff(sid, { role: 'admin', username: data.admin_username, full_name: data.admin_full_name || `Administrador ${d.name}`, email: data.admin_email, phone: data.admin_phone });
       return { school: schoolOut(getSchool(sid)), admin };
@@ -112,8 +115,8 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
     const d = schoolData(data, prev);
     if (db.get('SELECT id FROM schools WHERE lower(name) = lower(?) AND id <> ?', [d.name, prev.id])) throw new AppError('Ya existe una escuela con ese nombre', 'DUPLICADO');
     const prevStatus = prev.status === 'suspendida' ? 'pausada' : prev.status;
-    db.run('UPDATE schools SET name=?, plan_note=?, contact_name=?, contact_phone=?, contact_email=? WHERE id=?',
-      [d.name, d.plan_note, d.contact_name, d.contact_phone, d.contact_email, prev.id]);
+    db.run('UPDATE schools SET name=?, account_type=?, plan_note=?, contact_name=?, contact_phone=?, contact_email=? WHERE id=?',
+      [d.name, d.account_type, d.plan_note, d.contact_name, d.contact_phone, d.contact_email, prev.id]);
     // El estado se cambia con las reglas de la mensualidad (pausar cierra sesiones; reactivar da un periodo vigente)
     if (d.status !== prevStatus) {
       if (!billing) db.run('UPDATE schools SET status = ? WHERE id = ?', [d.status, prev.id]);

@@ -82,7 +82,7 @@ function createService(db, opts = {}) {
   }
   // Fragmento SQL de filtro por escuela (id numérico validado, nunca texto del usuario)
   const scope = (actor, alias) => { const id = sch(actor); return id === null ? '' : ` AND ${alias ? alias + '.' : ''}school_id = ${id}`; };
-  const schoolRow = (id) => (id ? db.get('SELECT uuid, name FROM schools WHERE id = ?', [id]) || {} : {});
+  const schoolRow = (id) => (id ? db.get('SELECT uuid, name, account_type FROM schools WHERE id = ?', [id]) || {} : {});
   const schoolName = (id) => schoolRow(id).name || null;
   // Tutores visibles para una escuela: los de la escuela o con hijos en ella
   const TUTOR_IN_SCHOOL = (id) => `(u.school_id = ${id} OR EXISTS (SELECT 1 FROM children x WHERE x.tutor_id = u.id AND x.school_id = ${id}))`;
@@ -108,7 +108,7 @@ function createService(db, opts = {}) {
   function publicUser(u) {
     if (!u) return null;
     return { id: u.id, username: u.username, role: u.role, full_name: u.full_name, phone: u.phone, email: u.email, active: !!u.active, must_change_password: !!u.must_change_password,
-      school_id: u.school_id === undefined ? null : u.school_id, school_name: schoolName(u.school_id), school_uuid: schoolRow(u.school_id).uuid || null };
+      school_id: u.school_id === undefined ? null : u.school_id, school_name: schoolName(u.school_id), school_uuid: schoolRow(u.school_id).uuid || null, school_type: schoolRow(u.school_id).account_type || 'escuela' };
   }
 
   // ---------- auth ----------

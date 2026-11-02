@@ -138,6 +138,30 @@
   };
   const navItems = (role) => NAV[role].flatMap(([, items]) => items);
   const ROLE_LABEL = { superadmin: 'Superadministrador', admin: 'Administrador', cajero: 'Cajero', tutor: 'Padre / tutor' };
+
+  // Terminología por cuenta: las cuentas de tipo 'natacion' ven términos de academia de natación en lugar de
+  // los escolares (solo texto visible; la lógica y los datos no cambian). Las escuelas no se modifican.
+  const TERM_MAPS = {
+    natacion: [
+      [/Tiendita escolar|Cooperativa escolar/g, 'Tiendita'],
+      [/Cooperativas/g, 'Tienditas'], [/cooperativas/g, 'tienditas'], [/Cooperativa/g, 'Tiendita'], [/cooperativa/g, 'tiendita'],
+      [/Alumnos/g, 'Nadadores'], [/alumnos/g, 'nadadores'], [/ALUMNOS/g, 'NADADORES'], [/Alumno/g, 'Nadador'], [/alumno/g, 'nadador'],
+      [/Escuelas/g, 'Academias'], [/escuelas/g, 'academias'], [/Escuela/g, 'Academia'], [/escuela/g, 'academia'],
+      [/Grado y grupo/g, 'Nivel/Horario'], [/grado y grupo/g, 'nivel/horario'],
+      [/Grados?(\s*\/\s*grupos?)?/g, 'Nivel/Horario'], [/grados?(\s*\/\s*grupos?)?/g, 'nivel/horario'], [/Grupos?/g, 'Nivel/Horario'], [/grupos?/g, 'nivel/horario'],
+    ],
+  };
+  const termMap = () => (state.user && state.user.role !== 'superadmin' ? TERM_MAPS[state.user.school_type] : null);
+  const termText = (t, m) => { for (const [re, r] of m) t = t.replace(new RegExp('(^|[^\\p{L}])(?:' + re.source + ')(?![\\p{L}])', 'gu'), (x, pre) => pre + r); return t; };
+  function applyTerms(root) {
+    const m = termMap(); if (!m || !root) return;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    for (let n = root; n; n = w.nextNode()) {
+      if (n.nodeType === 3) { const p = n.parentNode; if (p && /^(SCRIPT|STYLE|TEXTAREA)$/.test(p.nodeName)) continue; const t = termText(n.nodeValue, m); if (t !== n.nodeValue) n.nodeValue = t; }
+      else if (n.nodeType === 1) for (const a of ['placeholder', 'title', 'aria-label']) { const v = n.getAttribute && n.getAttribute(a); if (v) { const t = termText(v, m); if (t !== v) n.setAttribute(a, t); } }
+    }
+  }
+  if (typeof MutationObserver !== 'undefined') new MutationObserver((ms) => { if (!termMap()) return; for (const x of ms) for (const n of x.addedNodes) applyTerms(n.nodeType === 3 ? n.parentNode : n); if (ms.some((x) => x.type === 'characterData')) applyTerms(document.body); }).observe(document.documentElement, { childList: true, subtree: true });
   function go(view, params = {}) { state.view = view; state.params = params; render(); }
 
   function render() {
@@ -1410,10 +1434,11 @@
     const plan = h('textarea', { rows: 2, placeholder: 'p. ej. Plan anual $1,500 MXN/mes, pago el día 5' }); plan.value = s && s.plan_note ? s.plan_note : '';
     const cname = h('input', { value: s ? s.contact_name || '' : '' }); const cphone = h('input', { value: s ? s.contact_phone || '' : '', type: 'tel', placeholder: '10 dígitos' });
     const cemail = h('input', { value: s ? s.contact_email || '' : '', type: 'email' });
-    const fields = { name, status, plan, cname, cphone, cemail };
-    const el = h('div', { class: 'form' }, field('Nombre de la escuela', name), h('div', { class: 'grid g2' }, s ? null : field('Estado inicial', status), field('Contacto (director/a)', cname)),
+    const atype = h('select', null, [['escuela', 'Escuela (términos escolares)'], ['natacion', 'Natación (Academia, Nadadores, Nivel/Horario)']].map(([k, l]) => h('option', { value: k, selected: k === ((s && s.account_type) || 'escuela') }, l)));
+    const fields = { name, status, plan, cname, cphone, cemail, atype };
+    const el = h('div', { class: 'form' }, field('Nombre de la escuela', name), field('Tipo de cuenta', atype), h('div', { class: 'grid g2' }, s ? null : field('Estado inicial', status), field('Contacto (director/a)', cname)),
       h('div', { class: 'grid g2' }, field('Teléfono de contacto', cphone), field('Correo de contacto', cemail)), field('Plan / cuota (nota interna)', plan));
-    const data = () => ({ name: name.value, ...(s ? {} : { status: status.value }), plan_note: plan.value, contact_name: cname.value, contact_phone: cphone.value, contact_email: cemail.value });
+    const data = () => ({ name: name.value, account_type: atype.value, ...(s ? {} : { status: status.value }), plan_note: plan.value, contact_name: cname.value, contact_phone: cphone.value, contact_email: cemail.value });
     return { el, data, fields };
   }
   function newSchoolModal() {
