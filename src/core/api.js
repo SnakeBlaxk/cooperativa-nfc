@@ -55,6 +55,7 @@ function createApi(svc) {
     pushSubscribe: (u, a) => svc.pushSubscribe(u, a),
     pushUnsubscribe: (u, a) => svc.pushUnsubscribe(u, a),
     // Mensualidades (solo academias de natación)
+    helpFaq: (u) => svc.helpFaq(u),
     mensGetSettings: (u) => svc.mensGetSettings(u),
     mensSetSettings: (u, a) => svc.mensSetSettings(u, a),
     mensGetPlan: (u, a) => svc.mensGetPlan(u, a.child_id),

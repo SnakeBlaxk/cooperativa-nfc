@@ -144,6 +144,43 @@
   const navItems = (role) => navFor(role).flatMap(([, items]) => items);
   // Botón de Ayuda (administradores): abre WhatsApp con el dueño de Zuki Company. Sin chatbot.
   const HELP_WA = 'https://wa.me/5215658629519';
+  const helpWaUrl = () => HELP_WA + '?text=' + encodeURIComponent(`Hola, necesito ayuda con mi cuenta de Zuki Pay (${(state.user && (state.user.school_name || state.user.username)) || ''})`);
+  const waLink = () => h('a', { class: 'btn ok', href: helpWaUrl(), target: '_blank', rel: 'noopener' }, 'Escribir a soporte por WhatsApp');
+  // Panel de Ayuda: Preguntas frecuentes (con buscador) y Hablar con la IA
+  function helpPanel() {
+    const box = h('div', { class: 'form', style: { minWidth: 'min(560px, 80vw)' } });
+    const home = () => { box.innerHTML = ''; put(box, h('p', { class: 'muted' }, '¿En qué le ayudamos?'),
+      h('div', { class: 'grid g2' }, h('button', { class: 'btn lg', onclick: faq }, '📖 Preguntas frecuentes'), h('button', { class: 'btn lg primary', onclick: chat }, '🤖 Hablar con la IA'))); };
+    const faq = async () => {
+      box.innerHTML = '';
+      let list = []; try { list = await call('helpFaq'); } catch (e) { toast(e.message, 'err'); }
+      const q = h('input', { placeholder: 'Buscar (p. ej. tarjeta, pago, inscripción)…' }); const out = h('div', { style: { maxHeight: '50vh', overflow: 'auto' } });
+      const norm = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const draw = () => { const w = norm(q.value.trim()); out.innerHTML = ''; const xs = list.filter((f) => !w || norm(f.q + ' ' + f.a).includes(w));
+        put(out, xs.length ? xs.map((f) => h('details', { class: 'faq', style: { padding: '8px 0', borderBottom: '1px solid #e6ebf2' } }, h('summary', { style: { fontWeight: 600, cursor: 'pointer' } }, f.q), h('p', { class: 'small', style: { margin: '6px 0 0' } }, f.a))) : h('p', { class: 'muted' }, 'Sin resultados.')); };
+      q.addEventListener('input', draw); draw();
+      put(box, h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: home }, '← Ayuda'), h('b', { class: 'grow' }, 'Preguntas frecuentes')), q, out,
+        h('p', { class: 'small', style: { marginTop: '10px' } }, '¿No encontraste tu respuesta? ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); chat(); } }, 'Habla con la IA')));
+    };
+    const chat = () => {
+      box.innerHTML = ''; const msgs = [];
+      const log = h('div', { style: { maxHeight: '45vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' } }, h('div', { class: 'small muted' }, 'Pregunte cómo usar Zuki Pay. Respuestas cortas en español.'));
+      const inp = h('input', { placeholder: 'Escriba su pregunta…', class: 'grow' }); const btn = h('button', { class: 'btn primary' }, 'Enviar');
+      const bubble = (role, text) => { const b = h('div', { style: { alignSelf: role === 'user' ? 'flex-end' : 'flex-start', background: role === 'user' ? 'var(--primary-bg)' : '#f3f6fa', padding: '8px 12px', borderRadius: '12px', maxWidth: '85%', whiteSpace: 'pre-wrap' } }, text); log.appendChild(b); log.scrollTop = log.scrollHeight; return b; };
+      const send = async () => {
+        const t = inp.value.trim(); if (!t) return; inp.value = ''; bubble('user', t); msgs.push({ role: 'user', content: t });
+        const wait = bubble('assistant', 'Escribiendo…'); btn.disabled = true;
+        const r = await window.coop.call('helpChat', { messages: msgs }); btn.disabled = false;
+        if (r && r.ok && r.data && r.data.configured) { wait.textContent = r.data.answer; msgs.push({ role: 'assistant', content: r.data.answer }); }
+        else { wait.textContent = r && r.ok ? 'El asistente de IA todavía no está activado. Con gusto le ayudamos por WhatsApp.' : ((r && r.error) || 'El asistente no está disponible.'); log.appendChild(h('div', null, waLink())); }
+      };
+      btn.addEventListener('click', send); inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+      put(box, h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: home }, '← Ayuda'), h('b', { class: 'grow' }, 'Hablar con la IA')), log, h('div', { class: 'row' }, inp, btn),
+        h('p', { class: 'small muted' }, '¿Prefiere hablar con una persona? ', h('a', { href: helpWaUrl(), target: '_blank', rel: 'noopener' }, 'Escribir a soporte por WhatsApp')));
+      inp.focus();
+    };
+    home(); modal('Ayuda', box);
+  }
   const ROLE_LABEL = { superadmin: 'Superadministrador', admin: 'Administrador', cajero: 'Cajero', tutor: 'Padre / tutor' };
 
   // Terminología por cuenta: las cuentas de tipo 'natacion' ven términos de academia de natación en lugar de
@@ -198,7 +235,7 @@
         !WEB && state.user.role !== 'tutor' ? h('div', { id: 'syncind', class: 'syncind', title: 'Clic para sincronizar ahora', onclick: () => window.coop.sync.now().then(updateSyncInd) }) : null,
         h('div', { class: 'who' }, h('b', null, state.user.full_name), h('span', null, ROLE_LABEL[state.user.role]),
           h('div', { style: { marginTop: '10px' } }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión'),
-            state.user.role === 'admin' ? [' ', h('a', { class: 'btn sm ok', id: 'btn-ayuda', target: '_blank', rel: 'noopener', title: 'Escríbenos por WhatsApp', href: HELP_WA + '?text=' + encodeURIComponent(`Hola, necesito ayuda con mi cuenta de Zuki Pay (${state.user.school_name || state.user.username})`) }, '💬 Ayuda')] : null))),
+            ['admin', 'cajero'].includes(state.user.role) ? [' ', h('button', { class: 'btn sm ok', id: 'btn-ayuda', onclick: () => helpPanel() }, '💬 Ayuda')] : null))),
       main));
     if (!WEB && state.user.role !== 'tutor') window.coop.sync.status().then(updateSyncInd);
     // Aviso de seguridad (recargas/ventas congeladas, solo lectura) para el personal de la escuela

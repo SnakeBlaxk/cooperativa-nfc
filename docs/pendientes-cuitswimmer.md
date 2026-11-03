@@ -78,4 +78,9 @@ Inscripción: **200 MXN** (confirmado 3 nov 2026), editable en *Mensualidades �
 - Envío de recordatorios/avisos por WhatsApp (WhatsApp Cloud API) y número de WhatsApp Business.
 - Pago por clase suelta (si se requiere).
 - (Hecho 3 nov 2026) Editar y borrar pagos registrados por error desde el historial del nadador (con confirmación; el vencimiento regresa un mes; borrado lógico con quién/cuándo).
-- (Hecho) Botón *💬 Ayuda* para administradores: abre WhatsApp a Canek (+52 56 5862 9519) con texto prellenado.
+- (Hecho) Botón *💬 Ayuda* (administrador y cajero, todas las cuentas): panel con **Preguntas frecuentes** (buscador; adaptadas
+  a los términos de la cuenta) y **Hablar con la IA** (`POST /api/help/chat`, solo sobre el uso de Zuki Pay, en español y breve;
+  límite 20 preguntas/hora por cuenta). Siempre ofrece *Escribir a soporte por WhatsApp* (+52 56 5862 9519).
+  **Para activar la IA en Render:** `ZUKIPAY_AI_API_KEY` (llave de OpenAI o API compatible; también acepta `OPENAI_API_KEY`).
+  Opcionales: `ZUKIPAY_AI_MODEL` (por defecto `gpt-4o-mini`) y `ZUKIPAY_AI_BASE_URL` (por defecto `https://api.openai.com/v1`).
+  Sin llave, el chat muestra un mensaje amable y el enlace de WhatsApp.

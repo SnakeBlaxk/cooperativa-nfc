@@ -125,6 +125,7 @@
         const r = await authed('/api/auth/change-password', { current: args.current, next: args.next });
         if (!r.ok) return r; store(r.data); return { ok: true, data: r.data.user };
       }
+      case 'helpChat': return authed('/api/help/chat', args);
       default: return authed('/api/rpc/' + encodeURIComponent(method), args);
     }
   }

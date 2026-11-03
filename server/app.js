@@ -7,6 +7,7 @@ const express = require('express');
 const { openDatabase } = require('../src/core/db');
 const { createService } = require('../src/core/service');
 const { createApi } = require('../src/core/api');
+const { createHelpAI } = require('../src/core/help');
 const { createAuth, consoleMailer } = require('../src/core/auth');
 const { seedPlatform, seedMinimal, ensureSuperadmin } = require('../src/core/seed');
 const { createPlatform } = require('../src/core/platform');
@@ -86,7 +87,7 @@ async function createServer(opts = {}) {
     next();
   });
 
-  const STATUS = { BLOQUEADO_SEGURIDAD: 423, SISTEMA_BLOQUEADO: 403, OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, ESCUELA_PAUSADA: 403, VERSION_OBSOLETA: 410, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, TARJETA_NO_AUTORIZADA: 403, SALDO_PENDIENTE: 409, LIMITE_INTENTOS: 429, INTERNO: 500 };
+  const STATUS = { BLOQUEADO_SEGURIDAD: 423, SISTEMA_BLOQUEADO: 403, OTRO_EQUIPO_PRINCIPAL: 409, REFERENCIA_FALTANTE: 409, SOLO_ESCRITORIO: 409, NO_AUTENTICADO: 401, PROHIBIDO: 403, DEBE_CAMBIAR_PASSWORD: 403, NO_ENCONTRADO: 404, ESCUELA_SUSPENDIDA: 403, ESCUELA_PAUSADA: 403, VERSION_OBSOLETA: 410, DUPLICADO: 409, CONFLICTO: 409, VALIDACION: 400, TARJETA_NO_AUTORIZADA: 403, SALDO_PENDIENTE: 409, LIMITE_INTENTOS: 429, LIMITE: 429, IA_NO_DISPONIBLE: 503, INTERNO: 500 };
   const send = (res, fn) => {
     Promise.resolve().then(fn).then((data) => res.json({ ok: true, data })).catch((e) => {
       const code = e.code || 'INTERNO';
@@ -114,6 +115,13 @@ async function createServer(opts = {}) {
   // ----- notificaciones push (llave pública VAPID para suscribirse) -----
   app.get('/api/push/key', (req, res) => res.json({ ok: true, data: { publicKey: push.publicKey } }));
   app.post('/api/push/test', authenticate(), requireRole('tutor'), (req, res) => send(res, async () => ({ sent: await push.test(req.user.id) })));
+
+  // ----- ayuda: asistente de IA (solo uso de Zuki Pay). Llave: ZUKIPAY_AI_API_KEY; límite por cuenta -----
+  const helpAI = opts.helpAI || createHelpAI();
+  app.post('/api/help/chat', authenticate(), requireRole('admin', 'cajero'), (req, res) => send(res, () => {
+    const s = db.get('SELECT name, account_type FROM schools WHERE id = ?', [req.user.school_id]) || {};
+    return helpAI.chat({ user: req.user, messages: (req.body || {}).messages, schoolName: s.name, type: s.account_type || 'escuela' });
+  }));
 
   // ----- autenticación -----
   app.post('/api/auth/login', (req, res) => send(res, () => auth.login(req.body.identifier || req.body.username, req.body.password, ctx(req))));

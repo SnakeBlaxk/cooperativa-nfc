@@ -3,6 +3,7 @@
 // Todas las funciones reciben `actor` (usuario autenticado) y validan permisos.
 const bcrypt = require('bcryptjs');
 const { createMensualidades } = require('./mensualidades');
+const { faqFor } = require('./help');
 
 class AppError extends Error {
   constructor(message, code = 'ERROR') { super(message); this.code = code; }
@@ -1090,9 +1091,10 @@ function createService(db, opts = {}) {
     };
   }
 
+  const helpFaq = (actor) => { requireRole(actor, 'admin', 'cajero'); return faqFor(schoolRow(sch(actor)).account_type || 'escuela').map(({ q, a }) => ({ q, a })); };
   const mens = createMensualidades({ db, AppError, requireRole, sch, getChildOrFail, ts, now });
   return {
-    mensGetSettings: mens.getSettings, mensSetSettings: mens.setSettings, mensGetPlan: mens.getPlan, mensSetPlan: mens.setPlan,
+    helpFaq, mensGetSettings: mens.getSettings, mensSetSettings: mens.setSettings, mensGetPlan: mens.getPlan, mensSetPlan: mens.setPlan,
     mensRegisterPayment: mens.registerPayment, mensUpdatePayment: mens.updatePayment, mensDeletePayment: mens.deletePayment, mensList: mens.list,
     login, assertSchoolActive, findUserByIdentifier, publicUser, changePassword, createUser, updateUser, listUsers,
     listChildren, createChild, updateChild,
