@@ -77,4 +77,5 @@ Inscripción: **200 MXN** (confirmado 3 nov 2026), editable en *Mensualidades �
 ## Pendiente
 - Envío de recordatorios/avisos por WhatsApp (WhatsApp Cloud API) y número de WhatsApp Business.
 - Pago por clase suelta (si se requiere).
-- Editar/eliminar un pago registrado por error (hoy no hay opción; corregir cambiando la fecha de inicio reinicia el conteo).
+- (Hecho 3 nov 2026) Editar y borrar pagos registrados por error desde el historial del nadador (con confirmación; el vencimiento regresa un mes; borrado lógico con quién/cuándo).
+- (Hecho) Botón *💬 Ayuda* para administradores: abre WhatsApp a Canek (+52 56 5862 9519) con texto prellenado.

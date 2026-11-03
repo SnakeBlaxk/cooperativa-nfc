@@ -61,6 +61,8 @@ function createApi(svc) {
     mensSetPlan: (u, a) => svc.mensSetPlan(u, a),
     mensRegisterPayment: (u, a) => svc.mensRegisterPayment(u, a),
     mensList: (u, a) => svc.mensList(u, a),
+    mensUpdatePayment: (u, a) => svc.mensUpdatePayment(u, a),
+    mensDeletePayment: (u, a) => svc.mensDeletePayment(u, a),
   };
   // session: objeto mutable { user }
   function handle(session, method, args) {

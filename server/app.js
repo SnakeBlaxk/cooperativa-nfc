@@ -196,7 +196,7 @@ async function createServer(opts = {}) {
 
   // ----- lógica de negocio (misma que el escritorio). Permisos validados en el servicio -----
   // Operaciones que quedan en la bitácora (quién, cuándo, IP, qué)
-  const AUDIT_RPC = { recharge: 'recarga', adjust: 'ajuste', deleteProduct: 'producto_borrado', createUser: 'usuario_creado', updateUser: 'usuario_editado', setCardStatus: 'tarjeta_estado', reportLostAndReplace: 'tarjeta_perdida', registerCard: 'tarjeta_registrada', assignCard: 'tarjeta_asignada', assignCardByUid: 'tarjeta_asignada', unassignCard: 'tarjeta_quitada', updateProduct: 'producto_editado', createProduct: 'producto_creado', createChild: 'alumno_creado', mensRegisterPayment: 'mensualidad_pago', mensSetSettings: 'mensualidad_precios' };
+  const AUDIT_RPC = { recharge: 'recarga', adjust: 'ajuste', deleteProduct: 'producto_borrado', createUser: 'usuario_creado', updateUser: 'usuario_editado', setCardStatus: 'tarjeta_estado', reportLostAndReplace: 'tarjeta_perdida', registerCard: 'tarjeta_registrada', assignCard: 'tarjeta_asignada', assignCardByUid: 'tarjeta_asignada', unassignCard: 'tarjeta_quitada', updateProduct: 'producto_editado', createProduct: 'producto_creado', createChild: 'alumno_creado', mensRegisterPayment: 'mensualidad_pago', mensUpdatePayment: 'mensualidad_pago_editado', mensDeletePayment: 'mensualidad_pago_borrado', mensSetSettings: 'mensualidad_precios' };
   const SEVERITY = { recharge: 'info', adjust: 'aviso', deleteProduct: 'aviso', reportLostAndReplace: 'aviso' };
   app.post('/api/rpc/:method', authenticate(), (req, res) => {
     const method = req.params.method;

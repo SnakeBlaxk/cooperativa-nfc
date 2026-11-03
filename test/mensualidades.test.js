@@ -86,3 +86,22 @@ test('plan, pago manual que avanza un mes, historial, inscripción y filtros', a
   const c3 = await rpc('createChild', NAT, { full_name: 'Nadador Tres' });
   assert.equal((await rpc('mensRegisterPayment', NAT, { child_id: c3.data.id })).ok, false);
 });
+
+test('editar y borrar un pago por error: el vencimiento regresa y queda auditoría', async () => {
+  const c = await rpc('createChild', NAT, { full_name: 'Nadador Cuatro' });
+  const start = '2026-01-31';
+  await rpc('mensSetPlan', NAT, { child_id: c.data.id, dias_semana: 2, fecha_inicio: start });
+  await rpc('mensRegisterPayment', NAT, { child_id: c.data.id, paid_at: '2026-01-30' });
+  let p = await rpc('mensRegisterPayment', NAT, { child_id: c.data.id, paid_at: '2026-02-27' });
+  assert.equal(p.data.next_due, '2026-03-31');
+  const last = p.data.payments[0];
+  p = await rpc('mensUpdatePayment', NAT, { id: last.id, amount_cents: 40000, note: 'corregido' });
+  assert.ok(p.ok, p.error); assert.equal(p.data.payments[0].amount_cents, 40000); assert.equal(p.data.next_due, '2026-03-31');
+  p = await rpc('mensDeletePayment', NAT, { id: last.id });
+  assert.ok(p.ok, p.error);
+  assert.equal(p.data.next_due, '2026-02-28'); assert.equal(p.data.payments.length, 1);
+  const row = S.db.get('SELECT deleted_at, deleted_by FROM swimmer_payments WHERE id = ?', [last.id]);
+  assert.ok(row.deleted_at && row.deleted_by);
+  assert.equal((await rpc('mensDeletePayment', NAT, { id: last.id })).ok, false);
+  assert.equal((await rpc('mensDeletePayment', ESC, { id: p.data.payments[0].id })).ok, false);
+});

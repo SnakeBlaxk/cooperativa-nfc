@@ -438,6 +438,11 @@ class Database {
     // NULL = valores por defecto (330/470/600/750/840/920 e inscripción 200 MXN).
     add('schools', 'mens_prices', 'TEXT');
     add('schools', 'inscripcion_cents', 'INTEGER');
+    // Pagos de mensualidad borrados por error: borrado lógico con quién/cuándo (auditoría)
+    add('swimmer_payments', 'deleted_at', 'TEXT');
+    add('swimmer_payments', 'deleted_by', 'TEXT');
+    add('swimmer_payments', 'updated_at', 'TEXT');
+    add('swimmer_payments', 'updated_by', 'TEXT');
     add('transactions', 'flag_note', 'TEXT');
     // v2.3: bajas con Papelera (borrado lógico de alumnos y papás/tutores) y reembolso al dar de baja
     add('children', 'deleted_at', 'TEXT');

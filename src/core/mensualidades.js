@@ -79,7 +79,7 @@ function createMensualidades({ db, AppError, requireRole, sch, getChildOrFail, t
     requireRole(actor, 'admin');
     const s = schoolOf(actor); const c = getChildOrFail(childId, actor);
     const out = planOut(c, planRow(c.id), s, today());
-    out.payments = db.all('SELECT * FROM swimmer_payments WHERE child_id = ? ORDER BY paid_at DESC, id DESC', [c.id]);
+    out.payments = db.all('SELECT * FROM swimmer_payments WHERE child_id = ? AND deleted_at IS NULL ORDER BY paid_at DESC, id DESC', [c.id]);
     return out;
   }
   function setPlan(actor, data = {}) {
@@ -136,6 +136,35 @@ function createMensualidades({ db, AppError, requireRole, sch, getChildOrFail, t
     if (f.status) { const want = String(f.status).split(','); rows = rows.filter((r) => want.includes(r.status)); }
     return rows.sort((a, b) => (a.next_due || '9999').localeCompare(b.next_due || '9999'));
   }
-  return { getSettings, setSettings, getPlan, setPlan, registerPayment, list };
+  function paymentOrFail(actor, s, id) {
+    const n = Number(id);
+    const p = Number.isInteger(n) && n > 0 ? db.get('SELECT * FROM swimmer_payments WHERE id = ? AND school_id = ? AND deleted_at IS NULL', [n, s.id]) : null;
+    if (!p) throw new AppError('Pago no encontrado', 'NO_ENCONTRADO');
+    return p;
+  }
+  const who = (actor) => actor.full_name || actor.username || null;
+  // Corrige un pago registrado por error (monto, fecha, nota). No cambia el vencimiento.
+  function updatePayment(actor, data = {}) {
+    requireRole(actor, 'admin');
+    const s = schoolOf(actor); const p = paymentOrFail(actor, s, data.id);
+    const amount = data.amount_cents === undefined ? p.amount_cents : data.amount_cents;
+    if (!Number.isInteger(amount) || amount < 0 || amount > 10000000) throw err('Monto inválido');
+    const paid_at = data.paid_at === undefined ? p.paid_at : String(data.paid_at);
+    if (!isYmd(paid_at)) throw err('Fecha de pago inválida');
+    const note = data.note === undefined ? p.note : (data.note ? String(data.note).trim().slice(0, 300) || null : null);
+    db.run('UPDATE swimmer_payments SET amount_cents=?, paid_at=?, note=?, updated_at=?, updated_by=? WHERE id=?', [amount, paid_at, note, ts(), who(actor), p.id]);
+    return getPlan(actor, p.child_id);
+  }
+  // Borra (lógicamente) un pago: el vencimiento regresa un mes. Queda registro de quién y cuándo.
+  function deletePayment(actor, data = {}) {
+    requireRole(actor, 'admin');
+    const s = schoolOf(actor); const p = paymentOrFail(actor, s, data.id);
+    db.transaction(() => {
+      db.run('UPDATE swimmer_payments SET deleted_at=?, deleted_by=? WHERE id=?', [ts(), who(actor), p.id]);
+      db.run('UPDATE swimmer_plans SET periodos_pagados = MAX(periodos_pagados - 1, 0), updated_at = ? WHERE child_id = ?', [ts(), p.child_id]);
+    });
+    return getPlan(actor, p.child_id);
+  }
+  return { getSettings, setSettings, getPlan, setPlan, registerPayment, updatePayment, deletePayment, list };
 }
 module.exports = { createMensualidades, dueDate, statusOf, DEFAULT_PRICES, DEFAULT_INSCRIPCION_CENTS, POR_VENCER_DIAS };

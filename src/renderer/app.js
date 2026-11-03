@@ -142,6 +142,8 @@
   const isNatacion = () => !!(state.user && state.user.role === 'admin' && state.user.school_type === 'natacion');
   const navFor = (role) => NAV[role].map(([t, its]) => [t, its.filter(([k]) => k !== 'mensualidades' || isNatacion())]);
   const navItems = (role) => navFor(role).flatMap(([, items]) => items);
+  // Botón de Ayuda (administradores): abre WhatsApp con el dueño de Zuki Company. Sin chatbot.
+  const HELP_WA = 'https://wa.me/5215658629519';
   const ROLE_LABEL = { superadmin: 'Superadministrador', admin: 'Administrador', cajero: 'Cajero', tutor: 'Padre / tutor' };
 
   // Terminología por cuenta: las cuentas de tipo 'natacion' ven términos de academia de natación en lugar de
@@ -195,7 +197,8 @@
             k === 'notificaciones' && state.notifCount ? h('span', { class: 'count', title: 'Sin leer' }, String(state.notifCount)) : null))))),
         !WEB && state.user.role !== 'tutor' ? h('div', { id: 'syncind', class: 'syncind', title: 'Clic para sincronizar ahora', onclick: () => window.coop.sync.now().then(updateSyncInd) }) : null,
         h('div', { class: 'who' }, h('b', null, state.user.full_name), h('span', null, ROLE_LABEL[state.user.role]),
-          h('div', { style: { marginTop: '10px' } }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión')))),
+          h('div', { style: { marginTop: '10px' } }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión'),
+            state.user.role === 'admin' ? [' ', h('a', { class: 'btn sm ok', id: 'btn-ayuda', target: '_blank', rel: 'noopener', title: 'Escríbenos por WhatsApp', href: HELP_WA + '?text=' + encodeURIComponent(`Hola, necesito ayuda con mi cuenta de Zuki Pay (${state.user.school_name || state.user.username})`) }, '💬 Ayuda')] : null))),
       main));
     if (!WEB && state.user.role !== 'tutor') window.coop.sync.status().then(updateSyncInd);
     // Aviso de seguridad (recargas/ventas congeladas, solo lectura) para el personal de la escuela
@@ -1379,6 +1382,20 @@
       try { await call('mensRegisterPayment', { child_id: p.child_id, amount_cents: parseMoney(amt.value), paid_at: date.value, note: note.value }); toast('Pago registrado', 'ok'); onDone(); } catch (e) { toast(e.message, 'err'); return false; }
     } }]);
   }
+  function editPayModal(x, onDone) {
+    const amt = h('input', { value: centsToInput(x.amount_cents) }); const date = h('input', { type: 'date', value: x.paid_at }); const note = h('input', { value: x.note || '' });
+    modal('Editar pago', h('div', { class: 'form' }, field('Monto (MXN)', amt), field('Fecha de pago', date), field('Nota', note)),
+      [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
+        try { await call('mensUpdatePayment', { id: x.id, amount_cents: parseMoney(amt.value), paid_at: date.value, note: note.value }); toast('Pago actualizado', 'ok'); onDone(); } catch (e) { toast(e.message, 'err'); return false; }
+      } }]);
+  }
+  function deletePayModal(x, onDone) {
+    modal('Borrar pago', h('div', { class: 'form' }, h('p', null, '¿Borrar el pago de ', h('b', null, money(x.amount_cents)), ` del ${dmy(x.paid_at)}?`),
+      h('p', { class: 'small muted' }, 'El próximo vencimiento regresará un mes. Queda registro de quién lo borró.')),
+    [{ label: 'Cancelar' }, { label: 'Sí, borrar pago', class: 'danger', onClick: async () => {
+      try { await call('mensDeletePayment', { id: x.id }); toast('Pago borrado', 'ok'); onDone(); } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+  }
   async function mensualidadTab(body, c) {
     const p = await call('mensGetPlan', { child_id: c.id });
     const reload = () => go('hijo', { id: c.id, tab: 'mensualidad' });
@@ -1393,8 +1410,8 @@
       h('div', { class: 'grid g4' }, kv('Mensualidad', money(p.monthly_cents)), kv('Días por semana', String(p.dias_semana)), kv('Próximo vencimiento', dmy(p.next_due)), h('div', null, h('div', { class: 'small muted' }, 'Estado'), mensBadge(p))),
       h('div', { class: 'small muted', style: { marginTop: '6px' } }, `Fecha de inicio: ${dmy(p.fecha_inicio)} · vence cada mes el mismo día (o el último día si el mes es más corto).`), insc,
       h('h2', { style: { marginTop: '16px' } }, 'Historial de pagos'),
-      p.payments.length ? h('table', null, h('tr', null, h('th', null, 'Fecha'), h('th', null, 'Periodo'), h('th', { class: 'right' }, 'Monto'), h('th', null, 'Nota'), h('th', null, 'Registró')),
-        p.payments.map((x) => h('tr', null, h('td', null, dmy(x.paid_at)), h('td', null, dmy(x.period_due)), h('td', { class: 'right' }, money(x.amount_cents)), h('td', null, x.note || ''), h('td', null, x.created_by || ''))))
+      p.payments.length ? h('table', null, h('tr', null, h('th', null, 'Fecha'), h('th', null, 'Periodo'), h('th', { class: 'right' }, 'Monto'), h('th', null, 'Nota'), h('th', null, 'Registró'), h('th', null, '')),
+        p.payments.map((x) => h('tr', null, h('td', null, dmy(x.paid_at)), h('td', null, dmy(x.period_due)), h('td', { class: 'right' }, money(x.amount_cents)), h('td', null, x.note || ''), h('td', null, x.created_by || ''), h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => editPayModal(x, reload) }, 'Editar'), ' ', h('button', { class: 'btn sm danger', onclick: () => deletePayModal(x, reload) }, 'Borrar')))))
         : h('p', { class: 'muted' }, 'Aún no hay pagos registrados.'));
   }
   VIEWS.mensualidades = async (main, params = {}) => {
