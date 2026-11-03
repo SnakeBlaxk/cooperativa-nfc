@@ -46,3 +46,15 @@ Quiere tres cosas para Cuitswimmer:
   existentes y Turso). Si se deja vacío se usa el teléfono (`whatsapp_effective` en la API).
   Los nadadores no tienen teléfono propio; el contacto es el del padre/tutor.
 - PENDIENTE: **no hay envío de WhatsApp** (ni proveedor, ni plantillas, ni programación de recordatorios).
+
+## Costos de mensualidad (confirmados por Canek, 2 nov 2026)
+| Días por semana | Mensualidad (MXN) |
+|---|---|
+| 1 | 330 |
+| 2 | 470 |
+| 3 | 600 |
+| 4 | 750 |
+| 5 | 840 |
+| 6 | 920 |
+
+Pendiente: día de vencimiento, si hay pago por clase suelta, número para WhatsApp Business.
