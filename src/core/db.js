@@ -328,6 +328,29 @@ CREATE TABLE IF NOT EXISTS school_notices (
   read_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_school_notices ON school_notices(school_id, id);
+-- Mensualidades de academias de natación (solo cuentas 'natacion'). Tablas aparte: no afectan a las escuelas.
+CREATE TABLE IF NOT EXISTS swimmer_plans (
+  child_id INTEGER PRIMARY KEY REFERENCES children(id),
+  school_id INTEGER REFERENCES schools(id),
+  dias_semana INTEGER,
+  fecha_inicio TEXT,
+  periodos_pagados INTEGER NOT NULL DEFAULT 0,
+  inscripcion_pagada INTEGER NOT NULL DEFAULT 0,
+  inscripcion_fecha TEXT,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS swimmer_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  school_id INTEGER REFERENCES schools(id),
+  child_id INTEGER NOT NULL REFERENCES children(id),
+  amount_cents INTEGER NOT NULL,
+  paid_at TEXT NOT NULL,
+  period_due TEXT,
+  note TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_swimmer_payments ON swimmer_payments(child_id, paid_at);
 `;
 
 const SYNC_TABLES = ['users', 'categories', 'products', 'children', 'cards', 'transactions'];
@@ -411,6 +434,10 @@ class Database {
     add('schools', 'tipo_pago', 'TEXT');
     // WhatsApp de la persona (opcional; si está vacío se usa el teléfono). Sin envío de WhatsApp todavía.
     add('users', 'whatsapp', 'TEXT');
+    // Mensualidades (natación): tabla de precios por días/semana (JSON, centavos) y costo de inscripción.
+    // NULL = valores por defecto (330/470/600/750/840/920 e inscripción 200 MXN).
+    add('schools', 'mens_prices', 'TEXT');
+    add('schools', 'inscripcion_cents', 'INTEGER');
     add('transactions', 'flag_note', 'TEXT');
     // v2.3: bajas con Papelera (borrado lógico de alumnos y papás/tutores) y reembolso al dar de baja
     add('children', 'deleted_at', 'TEXT');

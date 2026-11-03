@@ -132,13 +132,16 @@
       ['Mi cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
     admin: [['Inicio', [['dashboard', 'Resumen', '📊'], ['notificaciones', 'Notificaciones', '📬']]],
       ['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵']]],
-      ['Escuela', [['alumnos', 'Alumnos y padres', '🧒'], ['tarjetas', 'Tarjetas', '🪪'], ['programar', 'Programar tarjetas', '📶'], ['productos', 'Productos', '🍎']]],
+      ['Escuela', [['alumnos', 'Alumnos y padres', '🧒'], ['mensualidades', 'Mensualidades', '💳'], ['tarjetas', 'Tarjetas', '🪪'], ['programar', 'Programar tarjetas', '📶'], ['productos', 'Productos', '🍎']]],
       ['Reportes', [['reportes', 'Reportes', '📈'], ['movimientos', 'Movimientos', '🧾']]],
       ['Configuración', [['usuarios', 'Personal', '👥'], ['papelera', 'Papelera', '🗑️'], ['ajustes', 'Ajustes', '⚙️']]]],
     cajero: [['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵'], ['movimientos', 'Movimientos', '🧾'], ['corte', 'Corte del día', '🧮']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
     tutor: [['Mi familia', [['hijos', 'Mis hijos', '🧒'], ['movimientos', 'Historial', '🧾']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
   };
-  const navItems = (role) => NAV[role].flatMap(([, items]) => items);
+  // Mensualidades: solo academias de natación (las escuelas no ven esta opción)
+  const isNatacion = () => !!(state.user && state.user.role === 'admin' && state.user.school_type === 'natacion');
+  const navFor = (role) => NAV[role].map(([t, its]) => [t, its.filter(([k]) => k !== 'mensualidades' || isNatacion())]);
+  const navItems = (role) => navFor(role).flatMap(([, items]) => items);
   const ROLE_LABEL = { superadmin: 'Superadministrador', admin: 'Administrador', cajero: 'Cajero', tutor: 'Padre / tutor' };
 
   // Terminología por cuenta: las cuentas de tipo 'natacion' ven términos de academia de natación en lugar de
@@ -186,7 +189,7 @@
     $app.appendChild(h('div', { class: 'layout' },
       h('aside', { class: 'side' },
         h('div', { class: 'brand' }, h('img', { class: 'brand-logo', src: 'logo-zukipay-blanco.png', alt: 'Zuki Pay' }), h('small', null, subtitle)),
-        h('nav', { class: 'nav' }, NAV[state.user.role].map(([title, its]) => h('div', { class: 'nav-group' }, h('div', { class: 'nav-title' }, title),
+        h('nav', { class: 'nav' }, navFor(state.user.role).map(([title, its]) => h('div', { class: 'nav-group' }, h('div', { class: 'nav-title' }, title),
           its.map(([k, l, ico]) => h('a', { class: k === navActive ? 'active' : '', tabindex: '0', 'data-view': k, onclick: () => go(k), onkeydown: (e) => { if (e.key === 'Enter') go(k); } },
             h('span', { class: 'ico' }, ico), h('span', null, l), k === 'alertas' && state.alertCount ? h('span', { class: 'count' }, String(state.alertCount)) : null,
             k === 'notificaciones' && state.notifCount ? h('span', { class: 'count', title: 'Sin leer' }, String(state.notifCount)) : null))))),
@@ -812,6 +815,8 @@
   // ----- Tutores y alumnos (admin) -----
   VIEWS.alumnos = async (main) => {
     const [tutors, children] = await Promise.all([call('listUsers', { role: 'tutor' }), call('listChildren')]);
+    const planBy = {}; let mensPrices = {};
+    if (isNatacion()) { const [pls, st] = await Promise.all([call('mensList'), call('mensGetSettings')]); for (const p of pls) planBy[p.child_id] = p; mensPrices = st.prices_cents; }
     const editTutor = (t) => userModal(t, 'tutor');
     const editChild = (c) => {
       const name = h('input', { value: c ? c.full_name : '' }); const grade = h('input', { value: c ? c.grade || '' : '', placeholder: 'p. ej. 3° A' });
@@ -820,13 +825,21 @@
       let photo = c ? c.photo : null; const prev = h('div'); const setPrev = () => { prev.innerHTML = ''; prev.appendChild(avatar(photo)); };
       const file = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', onchange: async () => { if (file.files[0]) { photo = await resizeImage(file.files[0]); setPrev(); } } });
       setPrev();
+      // Natación: días por semana y fecha de inicio (la mensualidad sale de la tabla de precios de la academia)
+      const nat = isNatacion(); const pl = (c && planBy[c.id]) || {};
+      const dias = nat ? h('select', null, h('option', { value: '' }, '— Sin mensualidad —'), [1, 2, 3, 4, 5, 6].map((d) => h('option', { value: d, selected: pl.dias_semana === d }, `${d} día${d > 1 ? 's' : ''} por semana · ${money(mensPrices[d])}/mes`))) : null;
+      const inicio = nat ? h('input', { type: 'date', value: pl.fecha_inicio || '' }) : null;
+      const inscOk = nat ? h('input', { type: 'checkbox', checked: !!pl.inscripcion_pagada }) : null;
       modal(c ? 'Editar alumno' : 'Nuevo alumno', h('div', { class: 'form' }, field('Nombre completo', name), field('Grado y grupo', grade), field('Tutor', tutor),
+        nat ? h('div', { class: 'grid g2' }, field('Días por semana', dias), field('Fecha de inicio', inicio, 'Cada mes vence este mismo día.')) : null,
+        nat ? h('label', { class: 'check' }, inscOk, 'Inscripción pagada') : null,
         h('div', { class: 'row' }, prev, field('Foto (opcional)', file), h('button', { class: 'btn sm', onclick: () => { photo = null; setPrev(); } }, 'Quitar foto')),
         c ? h('label', { class: 'check' }, active, 'Alumno activo') : null),
       [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
         try {
           const data = { full_name: name.value, grade: grade.value, tutor_id: tutor.value ? Number(tutor.value) : null, photo };
-          if (c) await call('updateChild', { id: c.id, ...data, active: active.checked }); else await call('createChild', data);
+          const saved = c ? await call('updateChild', { id: c.id, ...data, active: active.checked }) : await call('createChild', data);
+          if (nat) await call('mensSetPlan', { child_id: saved.id, dias_semana: dias.value ? Number(dias.value) : null, fecha_inicio: inicio.value || null, inscripcion_pagada: inscOk.checked });
           toast('Alumno guardado', 'ok'); render();
         } catch (e) { toast(e.message, 'err'); return false; }
       } }]);
@@ -1204,11 +1217,13 @@
         h('div', null, h('div', { class: 'small muted' }, 'Este mes'), h('div', { style: { fontSize: '1.3rem', fontWeight: 700 } }, money(s.spent_month_cents)))));
     const tabs = h('div', { class: 'tabs' }, h('button', { class: 'btn', onclick: () => go(back) }, '← Volver'),
       (isTutor ? [['historial', 'Historial'], ['limites', 'Límites de gasto'], ['prohibidos', 'Productos prohibidos'], ['tarjeta', 'Tarjeta y perfil']]
-        : [['historial', 'Historial'], ['reglas', 'Límites y prohibidos (del tutor)'], ['tarjeta', 'Tarjeta y perfil']]).map(([k, l]) => h('button', { class: 'btn' + (k === tab ? ' active' : ''), onclick: () => go('hijo', { id: c.id, tab: k }) }, l)));
+        : [['historial', 'Historial'], ...(isNatacion() ? [['mensualidad', 'Mensualidad']] : []), ['reglas', 'Límites y prohibidos (del tutor)'], ['tarjeta', 'Tarjeta y perfil']]).map(([k, l]) => h('button', { class: 'btn' + (k === tab ? ' active' : ''), onclick: () => go('hijo', { id: c.id, tab: k }) }, l)));
     const body = h('div', { class: 'card' });
     put(main, header, tabs, body);
 
-    if (tab === 'historial') {
+    if (tab === 'mensualidad' && isNatacion()) {
+      await mensualidadTab(body, c);
+    } else if (tab === 'historial') {
       put(body, h('h2', null, 'Últimos movimientos'), h('p', { class: 'small muted' }, 'Incluye intentos de compra rechazados (por saldo, límites o productos prohibidos).'), movTable(s.movements, { showUser: false, showChild: false }));
     } else if (tab === 'reglas') {
       const pr = s.prohibitions || { products: [], categories: [] };
@@ -1351,6 +1366,61 @@
   }
 
   // ----- Escuela: notificaciones (solicitudes de los padres) -----
+  // ----- Mensualidades (solo academias de natación) -----
+  const MENS_BADGE = { al_corriente: 'ok', por_vencer: 'warn', vencida: 'err', sin_plan: '' };
+  const dmy = (s) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : '—');
+  const todayYmd = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const mensBadge = (p) => h('span', { class: 'badge ' + (MENS_BADGE[p.status] || '') }, p.status_label);
+  function payModal(p, onDone) {
+    const amt = h('input', { value: centsToInput(p.monthly_cents) }); const date = h('input', { type: 'date', value: todayYmd() }); const note = h('input', { placeholder: 'Opcional (p. ej. efectivo, transferencia)' });
+    modal('Registrar pago', h('div', { class: 'form' }, h('p', { class: 'small muted' }, `${p.child_name} · mensualidad que vence el ${dmy(p.next_due)}. Al registrar, el siguiente vencimiento avanza un mes.`),
+      field('Monto (MXN)', amt), field('Fecha de pago', date), field('Nota', note)),
+    [{ label: 'Cancelar' }, { label: 'Registrar pago', class: 'primary', onClick: async () => {
+      try { await call('mensRegisterPayment', { child_id: p.child_id, amount_cents: parseMoney(amt.value), paid_at: date.value, note: note.value }); toast('Pago registrado', 'ok'); onDone(); } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+  }
+  async function mensualidadTab(body, c) {
+    const p = await call('mensGetPlan', { child_id: c.id });
+    const reload = () => go('hijo', { id: c.id, tab: 'mensualidad' });
+    const kv = (k, v) => h('div', null, h('div', { class: 'small muted' }, k), h('div', { style: { fontSize: '1.2rem', fontWeight: 700 } }, v));
+    const insc = h('div', { class: 'small', style: { marginTop: '10px' } }, 'Inscripción (', money(p.inscripcion_cents), '): ',
+      p.inscripcion_pagada ? h('b', null, `pagada el ${dmy(p.inscripcion_fecha)}`) : h('span', null, 'pendiente ', h('button', { class: 'btn sm', onclick: async () => { const r = await safe(() => call('mensSetPlan', { child_id: c.id, inscripcion_pagada: true, inscripcion_fecha: todayYmd() })); if (r) reload(); } }, 'Marcar pagada hoy')));
+    if (!p.has_plan) {
+      put(body, h('h2', null, 'Mensualidad'), h('p', { class: 'muted' }, 'Sin mensualidad configurada. Use "Editar" en Alumnos para indicar días por semana y fecha de inicio.'), insc);
+      return;
+    }
+    put(body, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Mensualidad'), h('button', { class: 'btn primary', onclick: () => payModal(p, reload) }, 'Registrar pago')),
+      h('div', { class: 'grid g4' }, kv('Mensualidad', money(p.monthly_cents)), kv('Días por semana', String(p.dias_semana)), kv('Próximo vencimiento', dmy(p.next_due)), h('div', null, h('div', { class: 'small muted' }, 'Estado'), mensBadge(p))),
+      h('div', { class: 'small muted', style: { marginTop: '6px' } }, `Fecha de inicio: ${dmy(p.fecha_inicio)} · vence cada mes el mismo día (o el último día si el mes es más corto).`), insc,
+      h('h2', { style: { marginTop: '16px' } }, 'Historial de pagos'),
+      p.payments.length ? h('table', null, h('tr', null, h('th', null, 'Fecha'), h('th', null, 'Periodo'), h('th', { class: 'right' }, 'Monto'), h('th', null, 'Nota'), h('th', null, 'Registró')),
+        p.payments.map((x) => h('tr', null, h('td', null, dmy(x.paid_at)), h('td', null, dmy(x.period_due)), h('td', { class: 'right' }, money(x.amount_cents)), h('td', null, x.note || ''), h('td', null, x.created_by || ''))))
+        : h('p', { class: 'muted' }, 'Aún no hay pagos registrados.'));
+  }
+  VIEWS.mensualidades = async (main, params = {}) => {
+    if (!isNatacion()) { put(main, h('div', { class: 'card empty' }, 'Disponible solo para academias de natación.')); return; }
+    const [rows, st] = await Promise.all([call('mensList'), call('mensGetSettings')]);
+    const filt = params.f || 'pendientes';
+    const shown = rows.filter((r) => (filt === 'todos' ? true : filt === 'pendientes' ? ['vencida', 'por_vencer'].includes(r.status) : r.status === filt));
+    const fsel = h('select', { onchange: () => go('mensualidades', { f: fsel.value }) }, [['pendientes', 'Vencidas y por vencer'], ['vencida', 'Vencidas'], ['por_vencer', 'Por vencer (3 días o menos)'], ['al_corriente', 'Al corriente'], ['sin_plan', 'Sin mensualidad'], ['todos', 'Todos']].map(([k, l]) => h('option', { value: k, selected: k === filt }, l)));
+    const pin = {}; for (let d = 1; d <= 6; d++) pin[d] = h('input', { value: centsToInput(st.prices_cents[d]), style: { maxWidth: '110px' } });
+    const ins = h('input', { value: centsToInput(st.inscripcion_cents), style: { maxWidth: '110px' } });
+    const saveSettings = async () => {
+      try { const prices_cents = {}; for (let d = 1; d <= 6; d++) prices_cents[d] = parseMoney(pin[d].value); await call('mensSetSettings', { prices_cents, inscripcion_cents: parseMoney(ins.value) }); toast('Precios guardados', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
+    };
+    const cnt = (s) => rows.filter((r) => r.status === s).length;
+    put(main, pageHead('Mensualidades', 'Pagos mensuales de los nadadores. Se registran a mano (no se descuentan de la tarjeta).'),
+      h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, `Nadadores (${cnt('vencida')} vencidas · ${cnt('por_vencer')} por vencer)`), fsel),
+        shown.length ? h('table', null, h('tr', null, h('th', null, 'Nadador'), h('th', null, 'Tutor / WhatsApp'), h('th', { class: 'right' }, 'Mensualidad'), h('th', null, 'Vence'), h('th', null, 'Estado'), h('th', null, '')),
+          shown.map((r) => h('tr', null, h('td', null, h('b', null, r.child_name), h('div', { class: 'small muted' }, r.nivel || '')), h('td', null, r.tutor_name || '—', h('div', { class: 'small muted' }, r.tutor_whatsapp || '')),
+            h('td', { class: 'right' }, r.has_plan ? money(r.monthly_cents) : '—'), h('td', null, r.has_plan ? dmy(r.next_due) : '—'), h('td', null, mensBadge(r)),
+            h('td', { class: 'right' }, r.has_plan ? h('button', { class: 'btn sm primary', onclick: () => payModal(r, render) }, 'Registrar pago') : null, ' ', h('button', { class: 'btn sm', onclick: () => go('hijo', { id: r.child_id, tab: 'mensualidad' }) }, 'Ver')))))
+          : h('p', { class: 'muted' }, 'No hay nadadores con este filtro.')),
+      h('div', { class: 'card form', style: { marginTop: '16px' } }, h('h2', null, 'Precios de la academia'), h('p', { class: 'small muted' }, 'Mensualidad según los días por semana (MXN). Los cambios aplican a los siguientes pagos.'),
+        h('div', { class: 'grid g3' }, [1, 2, 3, 4, 5, 6].map((d) => field(`${d} día${d > 1 ? 's' : ''} por semana`, pin[d]))),
+        field('Costo de inscripción (MXN)', ins), h('div', null, h('button', { class: 'btn primary', onclick: saveSettings }, 'Guardar precios'))));
+  };
+
   VIEWS.notificaciones = async (main, params) => {
     const filter = params.f || 'pendiente';
     const rows = await call('listChangeRequests', filter === 'todas' ? {} : { status: filter });

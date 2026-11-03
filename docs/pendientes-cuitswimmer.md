@@ -57,4 +57,24 @@ Quiere tres cosas para Cuitswimmer:
 | 5 | 840 |
 | 6 | 920 |
 
-Pendiente: día de vencimiento, si hay pago por clase suelta, número para WhatsApp Business.
+Inscripción: **200 MXN** (confirmado 3 nov 2026), editable en *Mensualidades → Precios de la academia*.
+
+## Mensualidades — HECHO (3 nov 2026, solo cuentas `natacion`)
+- Menú *Mensualidades* (solo administrador de academias de natación; las escuelas no lo ven ni pueden usar la API).
+- En *Editar/Nuevo nadador*: **Días por semana** (1–6), **Fecha de inicio** (la elige el administrador) e **Inscripción pagada**.
+- La mensualidad sale de la tabla de precios de la academia (por defecto la de arriba; editable). Inscripción por defecto 200 MXN.
+- Vencimiento: cada mes el mismo día de la fecha de inicio; si el mes es más corto, el último día del mes
+  (se calcula como `fecha_inicio + pagos registrados` meses, sin arrastrar días cortos).
+- Estado: *Al corriente* / *Por vencer* (3 días o menos) / *Vencida*.
+- Perfil del nadador → pestaña *Mensualidad*: monto, próximo vencimiento, estado, **Registrar pago** (monto prellenado,
+  fecha, nota opcional; avanza un mes) e historial de pagos. Pago manual: sin cobro en línea ni descuento de saldo.
+- Lista con filtro (vencidas / por vencer / al corriente / sin mensualidad / todos), con tutor y WhatsApp.
+- Datos: `schools.mens_prices` (JSON, centavos), `schools.inscripcion_cents` (NULL = 200 MXN), tablas
+  `swimmer_plans` y `swimmer_payments` (migraciones aditivas; sin pérdida de datos).
+- Para los recordatorios por WhatsApp: RPC `mensList` con `{ status: 'vencida,por_vencer' }` devuelve
+  nadador, tutor, `tutor_whatsapp`, `monthly_cents` y `next_due`.
+
+## Pendiente
+- Envío de recordatorios/avisos por WhatsApp (WhatsApp Cloud API) y número de WhatsApp Business.
+- Pago por clase suelta (si se requiere).
+- Editar/eliminar un pago registrado por error (hoy no hay opción; corregir cambiando la fecha de inicio reinicia el conteo).

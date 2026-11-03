@@ -54,6 +54,13 @@ function createApi(svc) {
     setPushPrefs: (u, a) => svc.setPushPrefs(u, a),
     pushSubscribe: (u, a) => svc.pushSubscribe(u, a),
     pushUnsubscribe: (u, a) => svc.pushUnsubscribe(u, a),
+    // Mensualidades (solo academias de natación)
+    mensGetSettings: (u) => svc.mensGetSettings(u),
+    mensSetSettings: (u, a) => svc.mensSetSettings(u, a),
+    mensGetPlan: (u, a) => svc.mensGetPlan(u, a.child_id),
+    mensSetPlan: (u, a) => svc.mensSetPlan(u, a),
+    mensRegisterPayment: (u, a) => svc.mensRegisterPayment(u, a),
+    mensList: (u, a) => svc.mensList(u, a),
   };
   // session: objeto mutable { user }
   function handle(session, method, args) {

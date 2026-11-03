@@ -2,6 +2,7 @@
 // Lógica de negocio de la cooperativa. Independiente de Electron para poder probarla con node:test.
 // Todas las funciones reciben `actor` (usuario autenticado) y validan permisos.
 const bcrypt = require('bcryptjs');
+const { createMensualidades } = require('./mensualidades');
 
 class AppError extends Error {
   constructor(message, code = 'ERROR') { super(message); this.code = code; }
@@ -1089,7 +1090,10 @@ function createService(db, opts = {}) {
     };
   }
 
+  const mens = createMensualidades({ db, AppError, requireRole, sch, getChildOrFail, ts, now });
   return {
+    mensGetSettings: mens.getSettings, mensSetSettings: mens.setSettings, mensGetPlan: mens.getPlan, mensSetPlan: mens.setPlan,
+    mensRegisterPayment: mens.registerPayment, mensList: mens.list,
     login, assertSchoolActive, findUserByIdentifier, publicUser, changePassword, createUser, updateUser, listUsers,
     listChildren, createChild, updateChild,
     requestChildChange, listChangeRequests, changeRequestsUnread, markChangeRequestsRead, resolveChangeRequest,
