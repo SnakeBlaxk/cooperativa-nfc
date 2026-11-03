@@ -150,7 +150,8 @@
   function helpPanel() {
     const box = h('div', { class: 'form', style: { minWidth: 'min(560px, 80vw)' } });
     const home = () => { box.innerHTML = ''; put(box, h('p', { class: 'muted' }, '¿En qué le ayudamos?'),
-      h('div', { class: 'grid g2' }, h('button', { class: 'btn lg', onclick: faq }, '📖 Preguntas frecuentes'), h('button', { class: 'btn lg primary', onclick: chat }, '🤖 Hablar con la IA'))); };
+      h('div', { class: 'grid g2' }, h('button', { class: 'btn lg', onclick: faq }, '📖 Preguntas frecuentes'), h('button', { class: 'btn lg primary', onclick: chat }, '🤖 Hablar con la IA')),
+      WEB ? h('p', { class: 'small', style: { textAlign: 'center' } }, h('a', { href: '/privacidad', target: '_blank', rel: 'noopener' }, 'Aviso de privacidad')) : null); };
     const faq = async () => {
       box.innerHTML = '';
       let list = []; try { list = await call('helpFaq'); } catch (e) { toast(e.message, 'err'); }
@@ -334,7 +335,8 @@
       h('button', { class: 'btn primary lg block', type: 'submit' }, 'Entrar'),
       WEB ? h('div', { class: 'links' },
         h('a', { href: '#', class: 'btn block', onclick: (e) => { e.preventDefault(); go('registro'); } }, 'Soy padre/madre: tengo un código de invitación'),
-        h('div', { class: 'note' }, '¿Olvidó su contraseña? Pida una nueva a la administración de su escuela.')) : null)));
+        h('div', { class: 'note' }, '¿Olvidó su contraseña? Pida una nueva a la administración de su escuela.')) : null,
+      WEB ? h('div', { class: 'note', style: { textAlign: 'center', marginTop: '10px' } }, h('a', { href: '/privacidad', target: '_blank', rel: 'noopener', id: 'link-privacidad' }, 'Aviso de privacidad')) : null)));
     setTimeout(() => u.focus(), 50);
   }
 

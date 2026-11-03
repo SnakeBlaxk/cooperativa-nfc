@@ -4,3 +4,5 @@ e2e-shots/
 *.db
 !test/fixtures/*.db
 *.db.tmp
+respaldo/
+cifrado/

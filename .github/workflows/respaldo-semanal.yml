@@ -1,0 +1,37 @@
+name: Respaldo semanal de la base (Turso)
+on:
+  schedule:
+    - cron: '0 9 * * 0'   # domingo 09:00 UTC = 03:00 America/Mexico_City
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --ignore-scripts --omit=dev
+      - name: Exportar base
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node scripts/backup-turso.js respaldo
+      # El repositorio es público: cualquier usuario de GitHub puede descargar artefactos,
+      # por eso el respaldo se sube SOLO cifrado (AES-256, clave en el secreto BACKUP_PASSPHRASE).
+      - name: Cifrar respaldo
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$BACKUP_PASSPHRASE" ]; then echo "Falta el secreto BACKUP_PASSPHRASE"; exit 1; fi
+          mkdir cifrado
+          tar czf - -C respaldo . | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_PASSPHRASE -out cifrado/respaldo-zukipay.tar.gz.enc
+          rm -rf respaldo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: respaldo-zukipay-${{ github.run_number }}
+          path: cifrado/respaldo-zukipay.tar.gz.enc
+          retention-days: 90
+          if-no-files-found: error

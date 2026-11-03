@@ -274,6 +274,9 @@ async function createServer(opts = {}) {
     return res.status(STATUS[r.code] || 400).json(r);
   });
 
+  // ----- Aviso de privacidad (público) -----
+  app.get('/privacidad', (req, res) => { res.setHeader('Cache-Control', 'no-cache'); res.type('html').send(require('./privacy').privacyPage()); });
+
   // ----- PWA -----
   const renderer = path.join(__dirname, '..', 'src', 'renderer');
   // iOS/Safari pide estas rutas por convención aunque el HTML declare otro ícono; si no existen

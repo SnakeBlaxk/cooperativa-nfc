@@ -4,14 +4,14 @@
 // * Siempre se pide primero a la red (la interfaz guardada solo se usa si no hay conexión).
 // * Las llamadas a /api/ nunca pasan por la caché: sin conexión fallan y la interfaz bloquea cobros y recargas.
 //   No hay cola de operaciones sin conexión.
-const CACHE = 'coop-v16';
+const CACHE = 'coop-v17';
 const SHELL = ['/', '/index.html', '/styles.css', '/web.css', '/app.js', '/install-gate.js', '/coop-web.js', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/favicon.ico', '/logo-zukipay.png', '/logo-zukipay-blanco.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
-  if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return; // datos: siempre a la red
+  if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname === '/privacidad') return; // datos: siempre a la red
   const isShell = req.mode === 'navigate' || SHELL.includes(url.pathname);
   if (!isShell) return; // otros archivos: red directa, sin guardar
   const key = req.mode === 'navigate' ? '/index.html' : url.pathname;
