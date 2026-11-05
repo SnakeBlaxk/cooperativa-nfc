@@ -351,6 +351,27 @@ CREATE TABLE IF NOT EXISTS swimmer_payments (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_swimmer_payments ON swimmer_payments(child_id, paid_at);
+-- Avisos de WhatsApp (WAHA) por escuela: interruptor, hora (0-23, America/Mexico_City) y bitácora para no repetir el mismo aviso el mismo día.
+CREATE TABLE IF NOT EXISTS whatsapp_settings (
+  school_id INTEGER PRIMARY KEY REFERENCES schools(id),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  send_hour INTEGER NOT NULL DEFAULT 9,
+  last_run_on TEXT,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS whatsapp_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  school_id INTEGER NOT NULL,
+  dedupe_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  phone TEXT,
+  body TEXT,
+  status TEXT NOT NULL,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (school_id, dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_log_school ON whatsapp_log(school_id, id);
 `;
 
 const SYNC_TABLES = ['users', 'categories', 'products', 'children', 'cards', 'transactions'];
@@ -432,7 +453,7 @@ class Database {
     // PENDIENTE (sin lógica): forma de cobro a los clientes de la cuenta: 'mensualidad' | 'por_clase' | NULL.
     // Ver docs/pendientes-cuitswimmer.md. No se usa en ningún cálculo todavía.
     add('schools', 'tipo_pago', 'TEXT');
-    // WhatsApp de la persona (opcional; si está vacío se usa el teléfono). Sin envío de WhatsApp todavía.
+    // WhatsApp de la persona (opcional; si está vacío se usa el teléfono). El envío lo hace WAHA (ver src/core/whatsapp.js).
     add('users', 'whatsapp', 'TEXT');
     // Mensualidades (natación): tabla de precios por días/semana (JSON, centavos) y costo de inscripción.
     // NULL = valores por defecto (330/470/600/750/840/920 e inscripción 200 MXN).

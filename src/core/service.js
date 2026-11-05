@@ -229,7 +229,8 @@ function createService(db, opts = {}) {
   // ---------- alumnos ----------
   function childRow(c) {
     const cards = db.all("SELECT id, uid, status, balance_cents FROM cards WHERE child_id = ? ORDER BY CASE status WHEN 'activa' THEN 0 WHEN 'bloqueada' THEN 1 ELSE 2 END, id DESC", [c.id]);
-    const tutor = db.get('SELECT id, full_name, username FROM users WHERE id = ?', [c.tutor_id]);
+    const tutor = c.tutor_id ? db.get('SELECT id, full_name, username, phone, whatsapp FROM users WHERE id = ?', [c.tutor_id]) : null;
+    if (tutor) tutor.whatsapp_effective = tutor.whatsapp || tutor.phone || null;
     const current = cards.find((k) => k.status === 'activa' || k.status === 'bloqueada') || null;
     return { ...c, active: !!c.active, school_name: schoolName(c.school_id), tutor, cards, card: current, balance_cents: current ? current.balance_cents : 0 };
   }
@@ -246,6 +247,15 @@ function createService(db, opts = {}) {
     if (typeof p !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/.test(p) || p.length > 400000) throw new AppError('Foto inválida (máx. ~300 KB, PNG/JPG/WEBP)', 'VALIDACION');
     return p;
   }
+  // Teléfono y WhatsApp del tutor, editables desde el perfil del alumno (10 dígitos de México).
+  function applyTutorContact(actor, tutorId, data) {
+    if (!data || (data.tutor_phone === undefined && data.tutor_whatsapp === undefined)) return;
+    if (!tutorId) throw new AppError('Asigne un papá o tutor para guardar el teléfono', 'VALIDACION');
+    const patch = {};
+    if (data.tutor_phone !== undefined) patch.phone = data.tutor_phone;
+    if (data.tutor_whatsapp !== undefined) patch.whatsapp = data.tutor_whatsapp;
+    updateUser(actor, tutorId, patch);
+  }
   function createChild(actor, data) {
     requireRole(actor, 'admin');
     // El tutor es opcional: si no se indica, se vincula después con un código de invitación
@@ -254,6 +264,7 @@ function createService(db, opts = {}) {
     const full_name = str(data.full_name, 'nombre del alumno');
     const grade = str(data.grade, 'grado/grupo', { optional: true, max: 30 });
     const photo = validPhoto(data.photo) || null;
+    applyTutorContact(actor, tutor ? tutor.id : null, data);
     const r = db.run('INSERT INTO children (school_id, tutor_id, full_name, grade, photo, created_at) VALUES (?,?,?,?,?,?)', [sch(actor), tutor ? tutor.id : null, full_name, grade, photo, ts()]);
     return childRow(db.get('SELECT * FROM children WHERE id = ?', [r.lastId]));
   }
@@ -277,6 +288,7 @@ function createService(db, opts = {}) {
       if (data.tutor_id === null || data.tutor_id === '' || data.tutor_id === 0) tutor_id = null;
       else if (data.tutor_id !== undefined && Number(data.tutor_id) !== c.tutor_id) tutor_id = getVisibleTutor(actor, data.tutor_id).id;
       if (data.active !== undefined) active = data.active ? 1 : 0;
+      applyTutorContact(actor, tutor_id, data);
     }
     db.run('UPDATE children SET full_name=?, grade=?, photo=?, tutor_id=?, active=? WHERE id=?', [full_name, grade, photo, tutor_id, active, c.id]);
     return childRow(db.get('SELECT * FROM children WHERE id = ?', [c.id]));
