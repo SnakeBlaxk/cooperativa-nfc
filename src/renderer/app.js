@@ -149,15 +149,18 @@
   // Panel de Ayuda: Preguntas frecuentes (con buscador) y Hablar con la IA
   function helpPanel() {
     const box = h('div', { class: 'form', style: { minWidth: 'min(560px, 80vw)' } });
-    const home = () => { box.innerHTML = ''; put(box, h('p', { class: 'muted' }, '¿En qué le ayudamos?'),
-      h('div', { class: 'grid g2' }, h('button', { class: 'btn lg', onclick: faq }, '📖 Preguntas frecuentes'), h('button', { class: 'btn lg primary', onclick: chat }, '🤖 Hablar con la IA'))); };
+    const home = () => { box.innerHTML = ''; put(box, h('p', { class: 'muted' }, 'Elija una forma de ayuda. Las tres siguen disponibles.'),
+      h('div', { class: 'help-choices' },
+        h('button', { class: 'btn', onclick: faq }, h('span', null, '📖 Preguntas frecuentes', h('span', { class: 'hint' }, 'Busque por tema: tarjeta, pago, inscripción'))),
+        h('button', { class: 'btn primary', onclick: chat }, h('span', null, '🤖 Hablar con la IA', h('span', { class: 'hint' }, 'Respuestas cortas sobre cómo usar Zuki Pay'))),
+        h('a', { class: 'btn', href: helpWaUrl(), target: '_blank', rel: 'noopener' }, h('span', null, 'Escribir a soporte por WhatsApp', h('span', { class: 'hint' }, 'Una persona de Zuki Company'))))); };
     const faq = async () => {
       box.innerHTML = '';
       let list = []; try { list = await call('helpFaq'); } catch (e) { toast(e.message, 'err'); }
       const q = h('input', { placeholder: 'Buscar (p. ej. tarjeta, pago, inscripción)…' }); const out = h('div', { style: { maxHeight: '50vh', overflow: 'auto' } });
       const norm = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
       const draw = () => { const w = norm(q.value.trim()); out.innerHTML = ''; const xs = list.filter((f) => !w || norm(f.q + ' ' + f.a).includes(w));
-        put(out, xs.length ? xs.map((f) => h('details', { class: 'faq', style: { padding: '8px 0', borderBottom: '1px solid #e6ebf2' } }, h('summary', { style: { fontWeight: 600, cursor: 'pointer' } }, f.q), h('p', { class: 'small', style: { margin: '6px 0 0' } }, f.a))) : h('p', { class: 'muted' }, 'Sin resultados.')); };
+        put(out, xs.length ? xs.map((f) => h('details', { class: 'faq' }, h('summary', null, f.q), h('p', { class: 'small', style: { margin: '6px 0 0' } }, f.a))) : h('p', { class: 'muted' }, 'Sin resultados.')); };
       q.addEventListener('input', draw); draw();
       put(box, h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: home }, '← Ayuda'), h('b', { class: 'grow' }, 'Preguntas frecuentes')), q, out,
         h('p', { class: 'small', style: { marginTop: '10px' } }, '¿No encontraste tu respuesta? ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); chat(); } }, 'Habla con la IA')));
@@ -225,13 +228,19 @@
     const main = h('div', { class: 'main' });
     const navActive = state.view === 'hijo' ? (state.user.role === 'tutor' ? 'hijos' : 'alumnos') : (state.view === 'institucion' ? 'instituciones' : state.view);
     const subtitle = state.user.role === 'superadmin' ? 'Zuki Company · Plataforma' : (state.user.role === 'tutor' ? 'Tiendita escolar' : (state.user.school_name || 'Tiendita escolar'));
+    const wideNav = window.matchMedia('(min-width: 901px)').matches;
+    const currentItem = navItems(state.user.role).find(([k]) => k === navActive);
     $app.appendChild(h('div', { class: 'layout' },
       h('aside', { class: 'side' },
         h('div', { class: 'brand' }, h('img', { class: 'brand-logo', src: 'logo-zukipay-blanco.png', alt: 'Zuki Pay' }), h('small', null, subtitle)),
-        h('nav', { class: 'nav' }, navFor(state.user.role).map(([title, its]) => h('div', { class: 'nav-group' }, h('div', { class: 'nav-title' }, title),
+        h('details', { class: 'side-menu', open: wideNav },
+          h('summary', { class: 'side-toggle', onclick: (e) => { if (window.matchMedia('(min-width: 901px)').matches) e.preventDefault(); } },
+            h('span', null, 'Menú'), h('span', { class: 'side-current' }, currentItem ? currentItem[1] : '')),
+          h('nav', { class: 'nav', 'aria-label': 'Secciones' }, navFor(state.user.role).map(([title, its]) => h('details', { class: 'nav-group', open: wideNav || its.some(([k]) => k === navActive) },
+          h('summary', { class: 'nav-title', onclick: (e) => { if (window.matchMedia('(min-width: 901px)').matches) e.preventDefault(); } }, title),
           its.map(([k, l, ico]) => h('a', { class: k === navActive ? 'active' : '', tabindex: '0', 'data-view': k, onclick: () => go(k), onkeydown: (e) => { if (e.key === 'Enter') go(k); } },
             h('span', { class: 'ico' }, ico), h('span', null, l), k === 'alertas' && state.alertCount ? h('span', { class: 'count' }, String(state.alertCount)) : null,
-            k === 'notificaciones' && state.notifCount ? h('span', { class: 'count', title: 'Sin leer' }, String(state.notifCount)) : null))))),
+            k === 'notificaciones' && state.notifCount ? h('span', { class: 'count', title: 'Sin leer' }, String(state.notifCount)) : null)))))),
         !WEB && state.user.role !== 'tutor' ? h('div', { id: 'syncind', class: 'syncind', title: 'Clic para sincronizar ahora', onclick: () => window.coop.sync.now().then(updateSyncInd) }) : null,
         h('div', { class: 'who' }, h('b', null, state.user.full_name), h('span', null, ROLE_LABEL[state.user.role]),
           h('div', { style: { marginTop: '10px' } }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión'),
@@ -412,19 +421,23 @@
 
   VIEWS.dashboard = async (main) => {
     const d = await call('dashboard');
-    main.appendChild(pageHead('Resumen de la cooperativa', `${d.school_name || 'Su escuela'} · cifras de hoy, la semana y el mes`, h('button', { class: 'btn primary', onclick: () => go('pos') }, '🛒 Ir a cobrar')));
+    main.appendChild(pageHead('Resumen de la cooperativa', `${d.school_name || 'Su escuela'} · lo de hoy primero; la semana y el mes, un toque más abajo`, h('button', { class: 'btn primary', onclick: () => go('pos') }, '🛒 Ir a cobrar')));
     const stat = statCard;
-    main.appendChild(h('div', { class: 'section-title', style: { marginTop: 0 } }, 'Ventas'));
-    main.appendChild(h('div', { class: 'grid g4' },
-      stat('Ventas de hoy', money(d.sales_day_cents), `${d.sales_day_count} ventas`),
-      stat('Ventas de la semana', money(d.sales_week_cents)),
-      stat('Ventas del mes', money(d.sales_month_cents)),
-      stat('Tarjetas activas', String(d.active_cards), `de ${d.total_cards} registradas`),
-      stat('Recargas de hoy', money(d.recharges_day_cents)),
-      stat('Recargas del mes', money(d.recharges_month_cents), 'Total histórico ' + money(d.recharges_total_cents)),
-      stat('Saldo en tarjetas', money(d.balance_in_cards_cents), 'Dinero de los alumnos'),
-      stat('Rechazos de hoy', String(d.rejected_today), 'Por límites, saldo o prohibiciones')));
-    main.appendChild(h('div', { class: 'grid', style: { gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', marginTop: '20px' } },
+    main.appendChild(h('div', { class: 'hero-metrics' },
+      h('div', { class: 'card stat stat-lead' }, h('div', { class: 'l' }, 'Ventas de hoy'), h('div', { class: 'v' }, money(d.sales_day_cents)), h('div', { class: 's' }, `${d.sales_day_count} ventas · recargas de hoy ${money(d.recharges_day_cents)}`)),
+      h('div', { class: 'grid g3 hero-side' },
+        stat('Saldo en tarjetas', money(d.balance_in_cards_cents), 'Dinero de los alumnos'),
+        stat('Tarjetas activas', String(d.active_cards), `de ${d.total_cards} registradas`),
+        stat('Rechazos de hoy', String(d.rejected_today), 'Por límites, saldo o prohibiciones'))));
+    main.appendChild(h('details', { class: 'fold' },
+      h('summary', null, h('span', { class: 'fold-title' }, 'Cifras de la semana y del mes'),
+        h('span', { class: 'fold-peek' }, `Semana ${money(d.sales_week_cents)} · Mes ${money(d.sales_month_cents)} · Recargas del mes ${money(d.recharges_month_cents)}`)),
+      h('div', { class: 'fold-body grid g4' },
+        stat('Ventas de la semana', money(d.sales_week_cents)),
+        stat('Ventas del mes', money(d.sales_month_cents)),
+        stat('Recargas de hoy', money(d.recharges_day_cents)),
+        stat('Recargas del mes', money(d.recharges_month_cents), 'Total histórico ' + money(d.recharges_total_cents)))));
+    main.appendChild(h('div', { class: 'dash-split' },
       h('div', { class: 'card chart' }, h('h2', null, 'Ventas por día (últimos 14 días)'), barChart(d.sales_by_day)),
       h('div', { class: 'card' }, h('h2', null, 'Más vendidos del mes'),
         d.top_products.length ? h('table', null, h('tr', null, h('th', null, 'Producto'), h('th', { class: 'right' }, 'Piezas'), h('th', { class: 'right' }, 'Total')),
@@ -445,7 +458,7 @@
     }
     data.forEach((d, i) => {
       const bh = (d.total_cents / max) * ih; const x = pad.l + i * bw + bw * 0.15;
-      const r = mk('rect', { x, y: pad.t + ih - bh, width: bw * 0.7, height: Math.max(bh, 0), rx: 4, fill: '#0b7f86' });
+      const r = mk('rect', { x, y: pad.t + ih - bh, width: bw * 0.7, height: Math.max(bh, 0), rx: 4, fill: '#4c1d95' });
       const t = document.createElementNS(NS, 'title'); t.textContent = `${d.date}: ${money(d.total_cents)}`; r.appendChild(t);
       const [, m, dd] = d.date.split('-');
       if (i % Math.ceil(data.length / 16) !== 0) return;
@@ -659,18 +672,23 @@
         p.low_stock ? h('div', null, badge(p.stock <= 0 ? 'agotado' : 'por agotarse', p.stock <= 0 ? 'err' : 'warn')) : null);
     };
     const tabs = h('div', { class: 'tabs' }, h('button', { class: 'btn' + (filter === 'todos' ? ' active' : ''), onclick: () => go('productos', {}) }, 'Todos'),
-      h('button', { class: 'btn' + (filter === 'agotarse' ? ' active' : ''), 'data-filter': 'agotarse', onclick: () => go('productos', { f: 'agotarse' }) }, '⚠️ Por agotarse', lowCount ? h('span', { class: 'count-pill' }, String(lowCount)) : null),
-      h('label', { class: 'check', style: { marginLeft: 'auto' } }, block, 'No vender si no hay existencias'));
+      h('button', { class: 'btn' + (filter === 'agotarse' ? ' active' : ''), 'data-filter': 'agotarse', onclick: () => go('productos', { f: 'agotarse' }) }, '⚠️ Por agotarse', lowCount ? h('span', { class: 'count-pill' }, String(lowCount)) : null));
     put(main, pageHead('Productos', 'Lo que se vende en la tiendita. Los productos desactivados no aparecen al cobrar. Ponga existencias para llevar inventario (opcional).',
       h('button', { class: 'btn', onclick: historial }, '📋 Movimientos de inventario'), h('button', { class: 'btn', onclick: newCat }, '+ Categoría'), h('button', { class: 'btn primary', onclick: () => edit(null) }, '+ Nuevo producto')),
-    tabs,
-    h('div', { class: 'card tablewrap' }, shown.length ? h('table', null, h('tr', null, h('th', null, 'Producto'), h('th', null, 'Categoría'), h('th', { class: 'right' }, 'Precio'), h('th', null, 'Existencias'), h('th', null, 'Estado'), h('th', null, '')),
-      shown.map((p) => h('tr', { 'data-product': p.id, class: p.low_stock ? 'low' : '' }, h('td', null, p.name), h('td', null, p.category_name), h('td', { class: 'right' }, money(p.price_cents)),
-        h('td', null, stockCell(p)),
-        h('td', null, p.active ? badge('activo', 'ok') : badge('inactivo', '')),
-        h('td', { class: 'right', style: { whiteSpace: 'nowrap' } }, h('button', { class: 'btn sm ok', onclick: () => entrada(p) }, '+ Entrada'), ' ', h('button', { class: 'btn sm', onclick: () => edit(p) }, 'Editar'), ' ',
-          h('button', { class: 'btn sm', onclick: async () => { await safe(() => call('updateProduct', { id: p.id, active: !p.active })); render(); } }, p.active ? 'Desactivar' : 'Activar'), ' ',
-          h('button', { class: 'btn sm danger', onclick: () => del(p) }, 'Eliminar')))))
+    h('div', { class: 'toolbar' }, tabs),
+    h('div', { class: 'inline-note' }, h('label', { class: 'check' }, block, 'No vender si no hay existencias')),
+    h('div', { class: 'card tablewrap' }, shown.length ? h('table', { class: 'resp' }, h('tr', { class: 'head' }, h('th', null, 'Producto'), h('th', null, 'Categoría'), h('th', { class: 'right' }, 'Precio'), h('th', null, 'Existencias'), h('th', null, 'Estado'), h('th', null, '')),
+      shown.map((p) => h('tr', { 'data-product': p.id, class: p.low_stock ? 'low' : '' },
+        h('td', { 'data-label': 'Producto' }, p.name), h('td', { 'data-label': 'Categoría' }, p.category_name), h('td', { 'data-label': 'Precio', class: 'right' }, money(p.price_cents)),
+        h('td', { 'data-label': 'Existencias' }, stockCell(p)),
+        h('td', { 'data-label': 'Estado' }, p.active ? badge('activo', 'ok') : badge('inactivo', '')),
+        h('td', { class: 'right', 'data-label': '' }, h('div', { class: 'row acts-wrap' },
+          h('button', { class: 'btn sm ok', onclick: () => entrada(p) }, '+ Entrada'),
+          h('button', { class: 'btn sm', onclick: () => edit(p) }, 'Editar'),
+          h('details', { class: 'row-more' }, h('summary', { class: 'btn sm' }, 'Más'),
+            h('div', { class: 'row-more-pop' },
+              h('button', { class: 'btn sm', onclick: async () => { await safe(() => call('updateProduct', { id: p.id, active: !p.active })); render(); } }, p.active ? 'Desactivar' : 'Activar'),
+              h('button', { class: 'btn sm danger', onclick: () => del(p) }, 'Eliminar'))))))))
       : h('div', { class: 'empty' }, filter === 'agotarse' ? 'Ningún producto está por agotarse. 👍' : 'Sin productos')));
   };
 
@@ -884,19 +902,49 @@
         } catch (e) { toast(e.message, 'err'); return false; }
       } }]);
     };
-    put(main, pageHead('Alumnos y padres', 'Alumnos con su tarjeta y saldo, y los padres o tutores vinculados.'),
-      h('div', { class: 'grid g2' },
-        h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Padres / tutores'), h('button', { class: 'btn primary sm', onclick: () => (WEB ? tutorTempModal() : editTutor(null)) }, '+ Tutor')),
-          h('table', null, h('tr', null, h('th', null, 'Nombre'), h('th', null, 'Usuario'), h('th', null, 'Hijos'), h('th', null, '')),
-            tutors.map((t) => h('tr', null, h('td', null, t.full_name, h('div', { class: 'small muted' }, [t.phone, t.email].filter(Boolean).join(' · '))), h('td', null, t.username, t.active ? '' : ' (inactivo)'),
-              h('td', null, (t.children || []).map((c) => c.full_name).join(', ') || '—'), h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => editTutor(t) }, 'Editar'), ' ', h('button', { class: 'btn sm danger', title: 'Eliminar papá/tutor', onclick: () => deleteTutorFlow(t, call, render) }, 'Eliminar papá/tutor')))))),
-        h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Alumnos'), h('button', { class: 'btn primary sm', onclick: () => editChild(null) }, '+ Alumno')),
-          h('table', null, h('tr', null, h('th', null, 'Alumno'), h('th', null, 'Tarjeta'), h('th', { class: 'right' }, 'Saldo'), h('th', null, '')),
-            children.map((c) => h('tr', null, h('td', null, h('div', { class: 'row' }, avatar(c.photo, 34), h('div', null, c.full_name, c.active ? '' : ' (inactivo)', h('div', { class: 'small muted' }, `${c.grade || ''} · ${c.tutor ? c.tutor.full_name : ''}`)))),
-              h('td', null, c.card ? [h('code', null, c.card.uid), ' ', badge(c.card.status)] : h('button', { class: 'btn sm ok', onclick: () => go('hijo', { id: c.id, tab: 'tarjeta' }) }, '🪪 Asignar tarjeta')),
-              h('td', { class: 'right' }, money(c.balance_cents)),
-              h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => editChild(c) }, 'Editar'), ' ', h('button', { class: 'btn sm primary', onclick: () => go('hijo', { id: c.id }) }, 'Ver'), ' ', h('button', { class: 'btn sm', onclick: () => go('hijo', { id: c.id, tab: 'tarjeta' }) }, 'Tarjeta'),
-                WEB ? [' ', h('button', { class: 'btn sm', onclick: () => invite(c) }, 'Invitación')] : null, ' ', h('button', { class: 'btn sm danger', onclick: () => deleteChildFlow(c, call, render) }, 'Eliminar alumno'))))))));
+    const q = h('input', { type: 'search', placeholder: 'Buscar por nombre, tutor, usuario o tarjeta', 'aria-label': 'Buscar en la lista' });
+    const showPane = (name) => {
+      main.querySelectorAll('[data-pane]').forEach((el) => { el.hidden = el.getAttribute('data-pane') !== name; });
+      main.querySelectorAll('[data-pane-btn]').forEach((el) => el.classList.toggle('active', el.getAttribute('data-pane-btn') === name));
+    };
+    q.addEventListener('input', () => {
+      const w = q.value.trim().toLowerCase();
+      main.querySelectorAll('[data-pane] tr').forEach((tr) => {
+        if (tr.querySelector('th')) return;
+        tr.classList.toggle('is-filtered', !!w && !tr.textContent.toLowerCase().includes(w));
+      });
+    });
+    const childRows = children.map((c) => h('tr', null,
+      h('td', { 'data-label': 'Alumno' }, h('div', { class: 'row' }, avatar(c.photo, 34), h('div', null, c.full_name, c.active ? '' : ' (inactivo)', h('div', { class: 'small muted' }, `${c.grade || ''} · ${c.tutor ? c.tutor.full_name : ''}`)))),
+      h('td', { 'data-label': 'Tarjeta' }, c.card ? [h('code', null, c.card.uid), ' ', badge(c.card.status)] : h('button', { class: 'btn sm ok', onclick: () => go('hijo', { id: c.id, tab: 'tarjeta' }) }, '🪪 Asignar tarjeta')),
+      h('td', { 'data-label': 'Saldo', class: 'right' }, money(c.balance_cents)),
+      h('td', { 'data-label': '' }, h('div', { class: 'acts' },
+        h('div', { class: 'row acts-wrap' },
+          h('button', { class: 'btn sm', onclick: () => editChild(c) }, 'Editar'),
+          h('button', { class: 'btn sm primary', onclick: () => go('hijo', { id: c.id }) }, 'Ver'),
+          h('button', { class: 'btn sm', onclick: () => go('hijo', { id: c.id, tab: 'tarjeta' }) }, 'Tarjeta'),
+          WEB ? h('button', { class: 'btn sm', onclick: () => invite(c) }, 'Invitación') : null),
+        h('button', { class: 'btn sm danger', onclick: () => deleteChildFlow(c, call, render) }, 'Eliminar alumno')))));
+    const tutorRows = tutors.map((t) => h('tr', null,
+      h('td', { 'data-label': 'Nombre' }, t.full_name, h('div', { class: 'small muted' }, [t.phone, t.email].filter(Boolean).join(' · '))),
+      h('td', { 'data-label': 'Usuario' }, t.username, t.active ? '' : ' (inactivo)'),
+      h('td', { 'data-label': 'Hijos' }, (t.children || []).map((c) => c.full_name).join(', ') || '—'),
+      h('td', { 'data-label': '' }, h('div', { class: 'row acts-wrap' },
+        h('button', { class: 'btn sm', onclick: () => editTutor(t) }, 'Editar'),
+        h('button', { class: 'btn sm danger', title: 'Eliminar papá/tutor', onclick: () => deleteTutorFlow(t, call, render) }, 'Eliminar papá/tutor')))));
+    put(main,
+      pageHead('Alumnos y padres', 'Una lista a la vez. Alumnos con tarjeta y saldo, o padres y tutores vinculados.',
+        h('button', { class: 'btn sm', onclick: () => (WEB ? tutorTempModal() : editTutor(null)) }, '+ Tutor'),
+        h('button', { class: 'btn primary sm', onclick: () => editChild(null) }, '+ Alumno')),
+      h('div', { class: 'toolbar' },
+        h('div', { class: 'tabs', role: 'tablist' },
+          h('button', { class: 'btn active', type: 'button', 'data-pane-btn': 'alumnos', onclick: () => showPane('alumnos') }, 'Alumnos'),
+          h('button', { class: 'btn', type: 'button', 'data-pane-btn': 'tutores', onclick: () => showPane('tutores') }, 'Padres / tutores')),
+        q),
+      h('div', { class: 'card tablewrap pane', 'data-pane': 'alumnos' },
+        h('table', { class: 'resp' }, h('tr', { class: 'head' }, h('th', null, 'Alumno'), h('th', null, 'Tarjeta'), h('th', { class: 'right' }, 'Saldo'), h('th', null, '')), childRows)),
+      h('div', { class: 'card tablewrap pane', 'data-pane': 'tutores', hidden: true },
+        h('table', { class: 'resp' }, h('tr', { class: 'head' }, h('th', null, 'Nombre'), h('th', null, 'Usuario'), h('th', null, 'Hijos'), h('th', null, '')), tutorRows)));
   };
   // Código de invitación para que el padre cree su cuenta y quede vinculado (solo servidor)
   async function invite(c) {
@@ -1142,8 +1190,9 @@
         h('div', null, h('h2', { style: { margin: 0 } }, r.school_name || 'Su escuela'), h('div', { class: 'muted' }, `${reportTitle(r, corte)} · ${rangeText(r)}`, r.only_cashier ? ` · ${r.only_cashier}` : '')), actions),
       h('div', { class: 'grid g4' }, statCard('Ventas', money(r.sales_cents), `${r.sales_count} ventas`), statCard('Ticket promedio', money(r.avg_ticket_cents)),
         statCard('Recargas', money(r.recharges_cents), r.refunds_count ? `${r.recharges_count} recargas · reembolsos por baja: ${money(r.refunds_cents)}` : `${r.recharges_count} recargas`), statCard('Ventas rechazadas', String(r.rejected_count), r.cancelled_count ? `${r.cancelled_count} canceladas (${money(r.cancelled_cents)})` : 'Por límites, saldo, prohibiciones o existencias')),
-      h('div', { class: 'card chart', style: { marginTop: '20px' } }, h('h2', null, 'Ventas por día'), barChart(r.sales_by_day)),
-      h('div', { class: 'grid g2', style: { marginTop: '20px' } },
+      h('div', { class: 'card chart', style: { marginTop: '16px' } }, h('h2', null, 'Ventas por día'), barChart(r.sales_by_day)),
+      h('div', { class: 'section-title' }, 'Detalle del periodo'),
+      h('div', { class: 'grid g2' },
         h('div', { class: 'card' }, h('h2', null, 'Productos más vendidos'), tbl([['Producto'], ['Piezas', 1], ['Total', 1]], r.top_products.map((p) => [p.name, p.qty, money(p.total_cents)]))),
         h('div', { class: 'card' }, h('h2', null, 'Ventas por cajero'), tbl([['Cajero'], ['Ventas', 1], ['Total', 1]], r.by_cashier.map((p) => [p.name, p.count, money(p.total_cents)])))),
       h('div', { class: 'card', style: { marginTop: '20px' } }, h('h2', null, 'Ventas rechazadas'),
@@ -1246,11 +1295,11 @@
     // Límites y prohibidos: solo el padre/madre/tutor los configura; la escuela solo los consulta
     let tab = params.tab || 'historial'; if (!isTutor && (tab === 'limites' || tab === 'prohibidos')) tab = 'reglas';
     const back = state.user.role === 'tutor' ? 'hijos' : 'alumnos';
-    const header = h('div', { class: 'card row', style: { marginBottom: '16px' } }, avatar(c.photo, 80),
+    const header = h('div', { class: 'card row kid-head', style: { marginBottom: '16px' } }, avatar(c.photo, 80),
       h('div', { class: 'grow' }, h('h1', { style: { margin: 0 } }, c.full_name), h('div', { class: 'muted' }, state.user.role === 'tutor' && c.school_name ? `🏫 ${c.school_name} · ` : '', c.grade || '', ' · Tutor: ', c.tutor ? c.tutor.full_name : ''),
         h('div', { style: { marginTop: '6px' } }, c.card ? [badge(c.card.status), ' ', h('span', { class: 'small muted' }, 'Tarjeta ' + c.card.uid)] : badge('sin tarjeta', 'warn'),
           s.pending_transfer_cents ? h('span', { class: 'small', style: { color: 'var(--warn)' } }, ` · Saldo pendiente por transferir: ${money(s.pending_transfer_cents)}`) : null)),
-      h('div', { class: 'grid g4', style: { minWidth: '520px' } },
+      h('div', { class: 'kid-metrics' },
         h('div', null, h('div', { class: 'small muted' }, 'Saldo'), h('div', { class: 'bal' }, money(c.balance_cents))),
         h('div', null, h('div', { class: 'small muted' }, 'Hoy'), h('div', { style: { fontSize: '1.3rem', fontWeight: 700 } }, money(s.spent_today_cents))),
         h('div', null, h('div', { class: 'small muted' }, 'Esta semana'), h('div', { style: { fontSize: '1.3rem', fontWeight: 700 } }, money(s.spent_week_cents))),
@@ -1456,7 +1505,8 @@
     const [rows, st] = await Promise.all([call('mensList'), call('mensGetSettings')]);
     const filt = params.f || 'pendientes';
     const shown = rows.filter((r) => (filt === 'todos' ? true : filt === 'pendientes' ? ['vencida', 'por_vencer'].includes(r.status) : r.status === filt));
-    const fsel = h('select', { onchange: () => go('mensualidades', { f: fsel.value }) }, [['pendientes', 'Vencidas y por vencer'], ['vencida', 'Vencidas'], ['por_vencer', 'Por vencer (3 días o menos)'], ['al_corriente', 'Al corriente'], ['sin_plan', 'Sin mensualidad'], ['todos', 'Todos']].map(([k, l]) => h('option', { value: k, selected: k === filt }, l)));
+    const FILTERS = [['pendientes', 'Vencidas y por vencer'], ['vencida', 'Vencidas'], ['por_vencer', 'Por vencer (3 días o menos)'], ['al_corriente', 'Al corriente'], ['sin_plan', 'Sin mensualidad'], ['todos', 'Todos']];
+    const fsel = h('select', { onchange: () => go('mensualidades', { f: fsel.value }), 'aria-label': 'Filtrar nadadores' }, FILTERS.map(([k, l]) => h('option', { value: k, selected: k === filt }, l)));
     const pin = {}; for (let d = 1; d <= 6; d++) pin[d] = h('input', { value: centsToInput(st.prices_cents[d]), style: { maxWidth: '110px' } });
     const ins = h('input', { value: centsToInput(st.inscripcion_cents), style: { maxWidth: '110px' } });
     const saveSettings = async () => {
@@ -1468,11 +1518,12 @@
         shown.length ? h('table', null, h('tr', null, h('th', null, 'Nadador'), h('th', null, 'Tutor / WhatsApp'), h('th', { class: 'right' }, 'Mensualidad'), h('th', null, 'Vence'), h('th', null, 'Estado'), h('th', null, '')),
           shown.map((r) => h('tr', null, h('td', null, h('b', null, r.child_name), h('div', { class: 'small muted' }, r.nivel || '')), h('td', null, r.tutor_name || '—', h('div', { class: 'small muted' }, r.tutor_whatsapp || '')),
             h('td', { class: 'right' }, r.has_plan ? money(r.monthly_cents) : '—'), h('td', null, r.has_plan ? dmy(r.next_due) : '—'), h('td', null, mensBadge(r)),
-            h('td', { class: 'right' }, r.has_plan ? h('button', { class: 'btn sm primary', onclick: () => payModal(r, render) }, 'Registrar pago') : null, ' ', h('button', { class: 'btn sm', onclick: () => go('hijo', { id: r.child_id, tab: 'mensualidad' }) }, 'Ver')))))
+            h('td', { class: 'right' }, h('div', { class: 'row acts-wrap' }, r.has_plan ? h('button', { class: 'btn sm primary', onclick: () => payModal(r, render) }, 'Registrar pago') : null, h('button', { class: 'btn sm', onclick: () => go('hijo', { id: r.child_id, tab: 'mensualidad' }) }, 'Ver'))))))
           : h('p', { class: 'muted' }, 'No hay nadadores con este filtro.')),
-      h('div', { class: 'card form', style: { marginTop: '16px' } }, h('h2', null, 'Precios de la academia'), h('p', { class: 'small muted' }, 'Mensualidad según los días por semana (MXN). Los cambios aplican a los siguientes pagos.'),
-        h('div', { class: 'grid g3' }, [1, 2, 3, 4, 5, 6].map((d) => field(`${d} día${d > 1 ? 's' : ''} por semana`, pin[d]))),
-        field('Costo de inscripción (MXN)', ins), h('div', null, h('button', { class: 'btn primary', onclick: saveSettings }, 'Guardar precios'))));
+      h('details', { class: 'fold' }, h('summary', null, h('span', { class: 'fold-title' }, 'Precios de la academia'), h('span', { class: 'fold-peek' }, `Inscripción ${money(st.inscripcion_cents)} · 1 a 6 días por semana`)),
+        h('div', { class: 'fold-body form' }, h('p', { class: 'small muted' }, 'Mensualidad según los días por semana (MXN). Los cambios aplican a los siguientes pagos.'),
+          h('div', { class: 'grid g3' }, [1, 2, 3, 4, 5, 6].map((d) => field(`${d} día${d > 1 ? 's' : ''} por semana`, pin[d]))),
+          field('Costo de inscripción (MXN)', ins), h('div', null, h('button', { class: 'btn primary', onclick: saveSettings }, 'Guardar precios')))));
   };
 
   VIEWS.notificaciones = async (main, params) => {
