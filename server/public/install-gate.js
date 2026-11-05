@@ -81,7 +81,7 @@
     if (el || !d.body) return;
     el = d.createElement('div'); el.id = 'install-gate'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
     el.dataset.platform = info.platform;
-    el.innerHTML = `<div class="ig-box"><img class="ig-logo" src="/logo-zukipay.png" alt="Zuki Pay">
+    el.innerHTML = `<div class="ig-box"><img class="ig-logo" src="/logo-zukipay-blanco.png" alt="Zuki Pay">
       <h1 class="ig-title">Instala Zuki Pay para continuar</h1>
       <p class="ig-lead">Zuki Pay funciona como una app en tu ${info.platform === 'ios' ? 'iPhone o iPad' : 'celular o tableta'}. Es gratis y tarda un minuto.</p>
       ${content()}<p class="ig-msg" id="ig-msg" aria-live="polite"></p></div>`;

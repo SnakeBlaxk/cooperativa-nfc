@@ -338,7 +338,7 @@
       }
     };
     $app.appendChild(h('div', { class: 'login-wrap' }, h('form', { class: 'card login form', onsubmit: submit },
-      h('div', { class: 'logo' }, h('img', { src: 'logo-zukipay.png', alt: 'Zuki Pay' })), h('h1', { class: 'sr-only' }, 'Zuki Pay'), h('p', { class: 'tag' }, 'Tiendita escolar con tarjeta'), paused,
+      h('div', { class: 'logo' }, h('img', { src: 'logo-zukipay-blanco.png', alt: 'Zuki Pay' })), h('h1', { class: 'sr-only' }, 'Zuki Pay'), h('p', { class: 'tag' }, 'Tiendita escolar con tarjeta'), paused,
       field('Usuario, correo o teléfono', u), field('Contraseña', p), err,
       h('button', { class: 'btn primary lg block', type: 'submit' }, 'Entrar'),
       WEB ? h('div', { class: 'links' },
