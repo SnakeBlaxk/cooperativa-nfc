@@ -7,16 +7,23 @@
   .side-toggle::-webkit-details-marker { display: none; }
   .side-current { color: #f6e7c1; font-weight: 600; }
   .side-menu[open] .nav { max-height: 42vh; overflow: auto; padding-bottom: 4px; }
-  .brand { padding: 2px 6px 10px; margin-bottom: 8px; flex-direction: row; align-items: center; gap: 10px; } .brand small { font-size: .85rem; }
+  .brand { padding: 2px 2px 8px; margin-bottom: 6px; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
+  .brand img.brand-logo { width: 92px; margin: 0; }
+  .brand-meta { flex: 1; text-align: right; align-items: flex-end; }
+  .brand-school { font-size: .92rem; max-width: 58vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brand-user { font-size: .72rem; max-width: 58vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #f6e7c1; }
+  .brand small { display: none; }
+  .side-toggle { padding: 8px 12px; margin-bottom: 6px; }
   .nav { display: block; }
   .nav-group { margin: 0 0 6px; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; background: rgba(255,255,255,.03); overflow: hidden; }
   summary.nav-title { display: flex; pointer-events: auto; padding: 10px 12px; color: #f3ead2; font-size: .78rem; }
   summary.nav-title::after { display: block; }
   .nav-group[open] { background: rgba(255,255,255,.05); }
   .nav a { padding: 10px 12px; font-size: .98rem; margin: 0 6px 4px; } .nav a .ico { width: auto; }
-  .side .who { margin: 8px 0 0; border-top: 1px solid rgba(255,255,255,.1); padding: 10px 6px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .side .who > div { margin-top: 0 !important; margin-left: auto; }
-  .main { padding: 18px 14px 40px; } .g2, .g3, .g4 { grid-template-columns: 1fr 1fr; }
+  .side .who { margin: 6px 0 0; border-top: 1px solid rgba(255,255,255,.1); padding: 8px 2px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .side .who-text { display: none; }
+  .side .who-actions { margin: 0 0 0 auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .main { padding: 14px 12px 40px; } .g2, .g3, .g4 { grid-template-columns: 1fr 1fr; }
   .pos { grid-template-columns: 1fr; height: auto; }
   table { font-size: .95rem; } .grid[style*="minWidth"] { min-width: 0 !important; }
   h1 { font-size: 1.4rem; }

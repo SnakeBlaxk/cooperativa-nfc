@@ -230,9 +230,16 @@
     const subtitle = state.user.role === 'superadmin' ? 'Zuki Company · Plataforma' : (state.user.role === 'tutor' ? 'Tiendita escolar' : (state.user.school_name || 'Tiendita escolar'));
     const wideNav = window.matchMedia('(min-width: 901px)').matches;
     const currentItem = navItems(state.user.role).find(([k]) => k === navActive);
+    const whoRole = ROLE_LABEL[state.user.role] || '';
+    const helpBtn = ['admin', 'cajero'].includes(state.user.role)
+      ? h('button', { class: 'btn sm ok', id: 'btn-ayuda', onclick: () => helpPanel() }, '💬 Ayuda') : null;
     $app.appendChild(h('div', { class: 'layout' },
       h('aside', { class: 'side' },
-        h('div', { class: 'brand' }, h('img', { class: 'brand-logo', src: 'logo-zukipay-blanco.png', alt: 'Zuki Pay' }), h('small', null, subtitle)),
+        h('div', { class: 'brand' },
+          h('img', { class: 'brand-logo', src: 'logo-zukipay-blanco.png', alt: 'Zuki Pay' }),
+          h('div', { class: 'brand-meta' },
+            h('strong', { class: 'brand-school' }, subtitle),
+            h('span', { class: 'brand-user' }, state.user.full_name + (whoRole ? ' · ' + whoRole : '')))),
         h('details', { class: 'side-menu', open: wideNav },
           h('summary', { class: 'side-toggle', onclick: (e) => { if (window.matchMedia('(min-width: 901px)').matches) e.preventDefault(); } },
             h('span', null, 'Menú'), h('span', { class: 'side-current' }, currentItem ? currentItem[1] : '')),
@@ -242,9 +249,9 @@
             h('span', { class: 'ico' }, ico), h('span', null, l), k === 'alertas' && state.alertCount ? h('span', { class: 'count' }, String(state.alertCount)) : null,
             k === 'notificaciones' && state.notifCount ? h('span', { class: 'count', title: 'Sin leer' }, String(state.notifCount)) : null)))))),
         !WEB && state.user.role !== 'tutor' ? h('div', { id: 'syncind', class: 'syncind', title: 'Clic para sincronizar ahora', onclick: () => window.coop.sync.now().then(updateSyncInd) }) : null,
-        h('div', { class: 'who' }, h('b', null, state.user.full_name), h('span', null, ROLE_LABEL[state.user.role]),
-          h('div', { style: { marginTop: '10px' } }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión'),
-            ['admin', 'cajero'].includes(state.user.role) ? [' ', h('button', { class: 'btn sm ok', id: 'btn-ayuda', onclick: () => helpPanel() }, '💬 Ayuda')] : null))),
+        h('div', { class: 'who' },
+          h('div', { class: 'who-text' }, h('b', null, state.user.full_name), h('span', null, whoRole)),
+          h('div', { class: 'who-actions' }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión'), helpBtn)),
       main));
     if (!WEB && state.user.role !== 'tutor') window.coop.sync.status().then(updateSyncInd);
     // Aviso de seguridad (recargas/ventas congeladas, solo lectura) para el personal de la escuela
