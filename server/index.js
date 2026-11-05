@@ -6,6 +6,8 @@
 //            ADMIN_USER, ADMIN_PASSWORD, SCHOOL_NAME (primera escuela, opcional),
 //            TURSO_DATABASE_URL + TURSO_AUTH_TOKEN (persistencia gratis en Turso), BACKUP_DIR (copias diarias en modo disco),
 //            LEGACY_SYNC=1 (solo para migrar cajas 1.x: acepta temporalmente su envío de ventas sin conexión)
+//            WhatsApp (WAHA, no Meta): WAHA_URL, WAHA_API_KEY, WAHA_SESSION, WAHA_DASHBOARD_URL, WAHA_SEND_DELAY_MS, WAHA_MX_PREFIX
+//            Sin WAHA_URL y WAHA_API_KEY los avisos de WhatsApp no se envían. Ver docs/whatsapp-waha.md.
 process.env.TZ = process.env.TZ || 'America/Mexico_City'; // horas de la escuela (México), también en Render
 const path = require('path');
 const fs = require('fs');

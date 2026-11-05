@@ -22,6 +22,7 @@ const FAQ = [
   { only: 'natacion', q: '¿Cómo borro o corrijo un pago registrado por error?', a: 'Perfil del alumno → Mensualidad → Historial de pagos → "Editar" para corregir monto, fecha o nota, o "Borrar" (pide confirmación). Al borrar, el vencimiento regresa un mes.' },
   { only: 'natacion', q: '¿Cómo registro la inscripción?', a: 'Al crear o editar al alumno marque "Inscripción pagada", o en la pestaña Mensualidad use "Marcar pagada hoy". El costo de inscripción ($200 por defecto) se cambia en Mensualidades → Precios de la academia.' },
   { only: 'natacion', q: '¿Cómo veo quién debe?', a: 'Menú Mensualidades: la lista filtra Vencidas y por vencer, Al corriente, Sin mensualidad o Todos, con el tutor y su WhatsApp.' },
+  { only: 'natacion', q: '¿Cómo se envían los recordatorios por WhatsApp?', a: 'Configuración → WhatsApp: active los avisos y elija la hora (Ciudad de México). El número de la academia se vincula una sola vez con el código QR del panel de WAHA (no es la API de Meta). Cada día se avisa al tutor de las mensualidades por vencer o vencidas, con su nombre, el del nadador, el monto y la fecha. No se repite el mismo aviso el mismo día. También se copian por WhatsApp la compra, la compra rechazada y el saldo bajo si el tutor tiene teléfono. El teléfono se edita en el perfil del nadador.' },
   { q: '¿Están seguros los datos?', a: 'Sí. La información se guarda en el servidor con acceso por usuario y contraseña, bitácora de cambios y respaldos. No comparta su contraseña.' },
 ];
 const TERMS = {

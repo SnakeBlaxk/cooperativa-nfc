@@ -69,8 +69,8 @@
     });
   }
   function field(label, input, hint) { return h('label', null, label, input, hint ? h('span', { class: 'hint' }, hint) : null); }
-  // WhatsApp opcional: si se deja vacío se usa el teléfono (aún no se envían mensajes)
-  function waField(input) { return field('WhatsApp (opcional)', input, 'Si lo dejas vacío, se usa el mismo que el teléfono.'); }
+  // WhatsApp opcional: si se deja vacío se usa el teléfono
+  function waField(input) { return field('WhatsApp (opcional)', input, 'Si lo dejas vacío, se usa el mismo que el teléfono. México, 10 dígitos.'); }
   // Encabezado de página: título grande, explicación corta y botones a la derecha
   function pageHead(title, sub, ...actions) {
     return h('div', { class: 'pagehead' }, h('div', { class: 'titles' }, h('h1', null, title), sub ? h('p', { class: 'sub' }, sub) : null),
@@ -134,7 +134,7 @@
       ['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵']]],
       ['Escuela', [['alumnos', 'Alumnos y padres', '🧒'], ['mensualidades', 'Mensualidades', '💳'], ['tarjetas', 'Tarjetas', '🪪'], ['programar', 'Programar tarjetas', '📶'], ['productos', 'Productos', '🍎']]],
       ['Reportes', [['reportes', 'Reportes', '📈'], ['movimientos', 'Movimientos', '🧾']]],
-      ['Configuración', [['usuarios', 'Personal', '👥'], ['papelera', 'Papelera', '🗑️'], ['ajustes', 'Ajustes', '⚙️']]]],
+      ['Configuración', [['usuarios', 'Personal', '👥'], ['whatsapp', 'WhatsApp', '💬'], ['papelera', 'Papelera', '🗑️'], ['ajustes', 'Ajustes', '⚙️']]]],
     cajero: [['Caja', [['pos', 'Cobrar', '🛒'], ['recargas', 'Recargas', '💵'], ['movimientos', 'Movimientos', '🧾'], ['corte', 'Corte del día', '🧮']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
     tutor: [['Mi familia', [['hijos', 'Mis hijos', '🧒'], ['movimientos', 'Historial', '🧾']]], ['Cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
   };
@@ -870,7 +870,17 @@
       const dias = nat ? h('select', null, h('option', { value: '' }, '— Sin mensualidad —'), [1, 2, 3, 4, 5, 6].map((d) => h('option', { value: d, selected: pl.dias_semana === d }, `${d} día${d > 1 ? 's' : ''} por semana · ${money(mensPrices[d])}/mes`))) : null;
       const inicio = nat ? h('input', { type: 'date', value: pl.fecha_inicio || '' }) : null;
       const inscOk = nat ? h('input', { type: 'checkbox', checked: !!pl.inscripcion_pagada }) : null;
+      const phone = h('input', { type: 'tel', placeholder: '10 dígitos' });
+      const wa = h('input', { type: 'tel', placeholder: 'Mismo que el teléfono' });
+      const syncContact = () => {
+        const t = tutors.find((x) => String(x.id) === String(tutor.value));
+        phone.disabled = !t; wa.disabled = !t;
+        phone.value = t ? (t.phone || '') : '';
+        wa.value = t ? (t.whatsapp || '') : '';
+      };
+      tutor.addEventListener('change', syncContact); syncContact();
       modal(c ? 'Editar alumno' : 'Nuevo alumno', h('div', { class: 'form' }, field('Nombre completo', name), field('Grado y grupo', grade), field('Tutor', tutor),
+        h('div', { class: 'grid g2' }, field('Teléfono del tutor', phone, 'México, 10 dígitos.'), waField(wa)),
         nat ? h('div', { class: 'grid g2' }, field('Días por semana', dias), field('Fecha de inicio', inicio, 'Cada mes vence este mismo día.')) : null,
         nat ? h('label', { class: 'check' }, inscOk, 'Inscripción pagada') : null,
         h('div', { class: 'row' }, prev, field('Foto (opcional)', file), h('button', { class: 'btn sm', onclick: () => { photo = null; setPrev(); } }, 'Quitar foto')),
@@ -878,6 +888,7 @@
       [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
         try {
           const data = { full_name: name.value, grade: grade.value, tutor_id: tutor.value ? Number(tutor.value) : null, photo };
+          if (tutor.value) { data.tutor_phone = phone.value; data.tutor_whatsapp = wa.value; }
           const saved = c ? await call('updateChild', { id: c.id, ...data, active: active.checked }) : await call('createChild', data);
           if (nat) await call('mensSetPlan', { child_id: saved.id, dias_semana: dias.value ? Number(dias.value) : null, fecha_inicio: inicio.value || null, inscripcion_pagada: inscOk.checked });
           toast('Alumno guardado', 'ok'); render();
@@ -888,7 +899,7 @@
       h('div', { class: 'grid g2' },
         h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Padres / tutores'), h('button', { class: 'btn primary sm', onclick: () => (WEB ? tutorTempModal() : editTutor(null)) }, '+ Tutor')),
           h('table', null, h('tr', null, h('th', null, 'Nombre'), h('th', null, 'Usuario'), h('th', null, 'Hijos'), h('th', null, '')),
-            tutors.map((t) => h('tr', null, h('td', null, t.full_name, h('div', { class: 'small muted' }, [t.phone, t.email].filter(Boolean).join(' · '))), h('td', null, t.username, t.active ? '' : ' (inactivo)'),
+            tutors.map((t) => h('tr', null, h('td', null, t.full_name, h('div', { class: 'small muted' }, [t.phone, t.whatsapp && t.whatsapp !== t.phone ? 'WA ' + t.whatsapp : null, t.email].filter(Boolean).join(' · '))), h('td', null, t.username, t.active ? '' : ' (inactivo)'),
               h('td', null, (t.children || []).map((c) => c.full_name).join(', ') || '—'), h('td', { class: 'right' }, h('button', { class: 'btn sm', onclick: () => editTutor(t) }, 'Editar'), ' ', h('button', { class: 'btn sm danger', title: 'Eliminar papá/tutor', onclick: () => deleteTutorFlow(t, call, render) }, 'Eliminar papá/tutor')))))),
         h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Alumnos'), h('button', { class: 'btn primary sm', onclick: () => editChild(null) }, '+ Alumno')),
           h('table', null, h('tr', null, h('th', null, 'Alumno'), h('th', null, 'Tarjeta'), h('th', { class: 'right' }, 'Saldo'), h('th', null, '')),
@@ -1239,6 +1250,21 @@
     })));
   };
 
+  // Teléfono del tutor en el perfil del alumno (México, 10 dígitos). Lo guarda en la cuenta del tutor.
+  function tutorContactBox(c) {
+    const tu = c.tutor;
+    if (!tu) return h('div', { style: { marginTop: '16px' } }, h('h2', null, 'Teléfono del tutor'), h('p', { class: 'muted' }, 'Asigne un papá o tutor en Editar para guardar su teléfono.'));
+    const phone = h('input', { type: 'tel', placeholder: '10 dígitos', value: tu.phone || '' });
+    const wa = h('input', { type: 'tel', placeholder: 'Mismo que el teléfono', value: tu.whatsapp || '' });
+    return h('div', { style: { marginTop: '16px' } }, h('h2', null, 'Teléfono del tutor'),
+      h('p', { class: 'small muted' }, `Contacto de ${tu.full_name}. México, 10 dígitos. Los avisos de WhatsApp salen a este número (si WhatsApp queda vacío, se usa el teléfono).`),
+      h('div', { class: 'grid g2' }, field('Teléfono', phone), waField(wa)),
+      h('div', null, h('button', { class: 'btn primary', onclick: async () => {
+        const r = await safe(() => call('updateChild', { id: c.id, tutor_phone: phone.value, tutor_whatsapp: wa.value }));
+        if (r) { toast('Teléfono guardado', 'ok'); go('hijo', { id: c.id, tab: 'tarjeta' }); }
+      } }, 'Guardar teléfono')));
+  }
+
   // ----- Detalle de un alumno (tutor y admin) -----
   VIEWS.hijo = async (main, params) => {
     const [s, products, categories] = await Promise.all([call('childSummary', { child_id: params.id }), call('listProducts', { child_id: params.id }), call('listCategories', { child_id: params.id })]);
@@ -1364,7 +1390,8 @@
         isTutor ? tutorProfile(c, prev, file, () => photo, (v) => { photo = v; setPrev(); }, await call('listChangeRequests', { child_id: c.id }))
           : h('div', null, h('h2', null, 'Personalizar'), h('div', { class: 'form' }, field('Nombre del alumno', name), field('Grado y grupo', grade),
             h('div', { class: 'row' }, prev, field('Foto (opcional)', file), h('button', { class: 'btn sm', onclick: () => { photo = null; setPrev(); } }, 'Quitar')),
-            h('div', null, h('button', { class: 'btn primary', onclick: async () => { const r = await safe(() => call('updateChild', { id: c.id, full_name: name.value, grade: grade.value, photo })); if (r) { toast('Perfil actualizado', 'ok'); go('hijo', { id: c.id, tab: 'tarjeta' }); } } }, 'Guardar'))))));
+            h('div', null, h('button', { class: 'btn primary', onclick: async () => { const r = await safe(() => call('updateChild', { id: c.id, full_name: name.value, grade: grade.value, photo })); if (r) { toast('Perfil actualizado', 'ok'); go('hijo', { id: c.id, tab: 'tarjeta' }); } } }, 'Guardar'))),
+            tutorContactBox(c))));
     }
   };
 
@@ -1463,7 +1490,8 @@
       try { const prices_cents = {}; for (let d = 1; d <= 6; d++) prices_cents[d] = parseMoney(pin[d].value); await call('mensSetSettings', { prices_cents, inscripcion_cents: parseMoney(ins.value) }); toast('Precios guardados', 'ok'); render(); } catch (e) { toast(e.message, 'err'); }
     };
     const cnt = (s) => rows.filter((r) => r.status === s).length;
-    put(main, pageHead('Mensualidades', 'Pagos mensuales de los nadadores. Se registran a mano (no se descuentan de la tarjeta).'),
+    put(main, pageHead('Mensualidades', 'Pagos mensuales de los nadadores. Se registran a mano (no se descuentan de la tarjeta).',
+      h('button', { class: 'btn', onclick: () => go('whatsapp') }, '💬 Avisos por WhatsApp')),
       h('div', { class: 'card tablewrap' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, `Nadadores (${cnt('vencida')} vencidas · ${cnt('por_vencer')} por vencer)`), fsel),
         shown.length ? h('table', null, h('tr', null, h('th', null, 'Nadador'), h('th', null, 'Tutor / WhatsApp'), h('th', { class: 'right' }, 'Mensualidad'), h('th', null, 'Vence'), h('th', null, 'Estado'), h('th', null, '')),
           shown.map((r) => h('tr', null, h('td', null, h('b', null, r.child_name), h('div', { class: 'small muted' }, r.nivel || '')), h('td', null, r.tutor_name || '—', h('div', { class: 'small muted' }, r.tutor_whatsapp || '')),
@@ -2431,6 +2459,58 @@
     put(main, pageHead('Bitácora', 'Registro de todo lo importante: quién lo hizo, cuándo, desde qué IP y qué cambió. No se puede borrar.'),
       h('div', { class: 'card filters' }, field('Desde', from), field('Hasta', to), field('Tipo', cat), field('Escuela', school), field('Buscar', q), h('button', { class: 'btn primary', onclick: load }, 'Buscar')), box);
     await load();
+  };
+
+  // ----- WhatsApp automático (WAHA, sin API de Meta) -----
+  VIEWS.whatsapp = async (main) => {
+    const st = await call('waStatus');
+    const conn = st.connection || {};
+    const badgeCls = conn.status === 'WORKING' ? 'ok' : (conn.status === 'FAILED' || conn.status === 'unreachable' ? 'err' : 'warn');
+    const en = h('input', { type: 'checkbox', checked: !!st.enabled });
+    const hour = h('select', null, Array.from({ length: 24 }, (_, hr) => h('option', { value: String(hr), selected: hr === st.send_hour }, `${String(hr).padStart(2, '0')}:00`)));
+    const testPhone = h('input', { type: 'tel', placeholder: '10 dígitos' });
+    const save = async () => {
+      const r = await safe(() => call('waSetSettings', { enabled: en.checked, send_hour: Number(hour.value) }));
+      if (r) { toast(r.enabled ? 'Avisos de WhatsApp activados' : 'Avisos de WhatsApp en pausa', 'ok'); go('whatsapp'); }
+    };
+    const test = async () => {
+      const r = await safe(() => call('waSendTest', { phone: testPhone.value }));
+      if (!r) return;
+      if (r.status === 'enviado') toast('Mensaje de prueba enviado a ' + (r.phone_mask || 'el número'), 'ok');
+      else toast(r.error || 'No se pudo enviar la prueba', 'err');
+      go('whatsapp');
+    };
+    const runNow = async () => {
+      if (!(await confirmBox('Enviar recordatorios de hoy', 'Se enviarán ahora los recordatorios de mensualidades por vencer o vencidas. No se repiten los que ya salieron hoy.'))) return;
+      const r = await safe(() => call('waRunNow'));
+      if (!r) return;
+      toast(`Listos: ${r.queued || 0} mensaje(s)` + (r.sin_telefono ? `, ${r.sin_telefono} sin teléfono` : ''), 'ok');
+      go('whatsapp');
+    };
+    const recent = (st.recent || []);
+    put(main, pageHead('WhatsApp', 'Avisos automáticos al papá o tutor. No usa la API de Meta: el número de la academia se vincula con un código QR.'),
+      h('div', { class: 'card' }, h('div', { class: 'row' }, h('h2', { class: 'grow', style: { margin: 0 } }, 'Conexión'), h('span', { class: 'badge ' + badgeCls }, conn.status_label || 'Sin datos')),
+        h('p', { class: 'small muted' }, st.configured ? `Sesión: ${st.session || 'default'}` + (conn.me ? ` · ${conn.me}` : '') : 'El servidor todavía no tiene WAHA_URL y WAHA_API_KEY. Hasta entonces no se envía ningún mensaje.'),
+        conn.error ? h('p', { class: 'small', style: { color: 'var(--err)' } }, conn.error) : null,
+        st.dashboard_url ? h('p', null, h('a', { class: 'btn primary', href: st.dashboard_url, target: '_blank', rel: 'noopener' }, 'Abrir panel de WAHA (código QR)')) : null,
+        h('ol', { class: 'small', style: { margin: '8px 0 0', paddingLeft: '1.2rem' } }, (st.instructions || []).map((t) => h('li', { style: { marginBottom: '4px' } }, t)))),
+      h('div', { class: 'card form', style: { marginTop: '16px' } }, h('h2', null, 'Avisos automáticos'),
+        h('p', { class: 'small muted' }, 'En pausa no sale ningún WhatsApp. La hora es de la Ciudad de México y aplica a los recordatorios de mensualidad. Las compras, rechazos y saldo bajo se envían en el momento, con una espera de unos ' + (st.delay_seconds || 30) + ' segundos entre mensajes.'),
+        h('label', { class: 'check' }, en, 'Activar envío automático por WhatsApp'),
+        field('Hora del recordatorio diario', hour, 'Solo ese horario. Si el servidor estaba apagado, se intenta mientras dure esa hora.'),
+        h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: save }, 'Guardar'),
+          st.account_type === 'natacion' ? h('button', { class: 'btn', onclick: runNow, disabled: !st.enabled }, 'Enviar recordatorios de hoy') : null),
+        st.last_run_on ? h('p', { class: 'small muted' }, 'Último día de recordatorios: ', st.last_run_on) : null),
+      h('div', { class: 'card form', style: { marginTop: '16px' } }, h('h2', null, 'Mensaje de prueba'),
+        h('p', { class: 'small muted' }, 'Úselo después de escanear el QR, con un teléfono que tenga WhatsApp. Una prueba por número cada hora.'),
+        field('Teléfono (10 dígitos)', testPhone),
+        h('div', null, h('button', { class: 'btn', onclick: test }, 'Enviar prueba'))),
+      h('div', { class: 'card tablewrap', style: { marginTop: '16px' } }, h('h2', null, 'Últimos envíos'),
+        recent.length ? h('table', null, h('tr', null, h('th', null, 'Cuándo'), h('th', null, 'Tipo'), h('th', null, 'Número'), h('th', null, 'Estado'), h('th', null, 'Mensaje')),
+          recent.map((r) => h('tr', null, h('td', null, fmtDate(r.created_at)), h('td', null, r.kind_label || r.kind), h('td', null, r.phone_mask || '—'),
+            h('td', null, r.status_label || r.status, r.error ? h('div', { class: 'small', style: { color: 'var(--err)' } }, r.error) : null),
+            h('td', null, h('div', { class: 'small' }, r.preview || '')))))
+          : h('p', { class: 'muted' }, 'Todavía no hay envíos.')));
   };
 
   // ----- Ajustes / Mi cuenta -----

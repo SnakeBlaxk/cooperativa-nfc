@@ -22,7 +22,7 @@ function resolveVapid(db, env = process.env) {
 }
 
 // sender(sub, payloadString) -> Promise; puede rechazar con { statusCode }
-function createPush(db, { svc, sender, env, log = console } = {}) {
+function createPush(db, { svc, sender, env, log = console, onNotice } = {}) {
   const vapid = resolveVapid(db, env);
   const send = sender || ((sub, payload) => {
     if (!webpush || !vapid) return Promise.reject(new Error('web-push no disponible'));
@@ -57,7 +57,7 @@ function createPush(db, { svc, sender, env, log = console } = {}) {
 
   // Avisos tras una compra (aprobada o rechazada) de un alumno
   function onPurchase(txId) {
-    const t = db.get('SELECT t.*, c.full_name AS child_name, c.tutor_id FROM transactions t LEFT JOIN children c ON c.id = t.child_id WHERE t.id = ?', [txId]);
+    const t = db.get('SELECT t.*, c.full_name AS child_name, c.tutor_id, c.school_id AS child_school_id FROM transactions t LEFT JOIN children c ON c.id = t.child_id WHERE t.id = ?', [txId]);
     if (!t || t.type !== 'compra' || !t.tutor_id) return track(Promise.resolve(0));
     const prefs = svc.getPushPrefsRaw(t.tutor_id);
     const items = db.all('SELECT product_name, qty FROM transaction_items WHERE transaction_id = ?', [t.id]);
@@ -73,11 +73,18 @@ function createPush(db, { svc, sender, env, log = console } = {}) {
         const st = db.get('SELECT notified FROM low_balance_state WHERE child_id = ?', [t.child_id]);
         if (low && !(st && st.notified)) {
           db.run('INSERT INTO low_balance_state (child_id, notified, updated_at) VALUES (?,1,?) ON CONFLICT(child_id) DO UPDATE SET notified = 1, updated_at = excluded.updated_at', [t.child_id, nowTs()]);
-          jobs.push({ kind: 'saldo_bajo', tag: 'saldo-' + t.child_id, title: `⚠️ Saldo bajo de ${first}`, body: `Le quedan ${money(t.balance_after_cents)} (aviso por debajo de ${money(prefs.low_balance_cents)}). Recargue en la cooperativa.` });
+          jobs.push({ kind: 'saldo_bajo', tag: 'saldo-' + t.child_id, dedupe: 'saldo-' + t.child_id + '-' + t.id, title: `⚠️ Saldo bajo de ${first}`, body: `Le quedan ${money(t.balance_after_cents)} (aviso por debajo de ${money(prefs.low_balance_cents)}). Recargue en la cooperativa.` });
         }
       }
     } else if (prefs.rejected) {
       jobs.push({ kind: 'rechazada', tag: 'rechazo-' + t.id, title: `⛔ Compra rechazada de ${first}`, body: `${t.reason || 'Rechazada'}${short ? ' · ' + short : ''} (${money(t.amount_cents)})` });
+    }
+    if (typeof onNotice === 'function') {
+      const schoolId = t.school_id || t.child_school_id;
+      for (const j of jobs) {
+        try { onNotice({ userId: t.tutor_id, schoolId, childId: t.child_id, childName: t.child_name, txId: t.id, ...j }); }
+        catch (e) { log.error('[push] aviso externo', e && e.message); }
+      }
     }
     return track(Promise.all(jobs.map((j) => toUser(t.tutor_id, j))).then((r) => r.reduce((a, b) => a + b, 0)).catch((e) => { log.error('[push]', e); return 0; }));
   }
