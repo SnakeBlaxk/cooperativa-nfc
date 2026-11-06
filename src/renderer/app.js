@@ -251,7 +251,7 @@
         !WEB && state.user.role !== 'tutor' ? h('div', { id: 'syncind', class: 'syncind', title: 'Clic para sincronizar ahora', onclick: () => window.coop.sync.now().then(updateSyncInd) }) : null,
         h('div', { class: 'who' },
           h('div', { class: 'who-text' }, h('b', null, state.user.full_name), h('span', null, whoRole)),
-          h('div', { class: 'who-actions' }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión'), helpBtn)),
+          h('div', { class: 'who-actions' }, h('button', { class: 'btn sm', onclick: logout }, 'Cerrar sesión'), helpBtn))),
       main));
     if (!WEB && state.user.role !== 'tutor') window.coop.sync.status().then(updateSyncInd);
     // Aviso de seguridad (recargas/ventas congeladas, solo lectura) para el personal de la escuela
