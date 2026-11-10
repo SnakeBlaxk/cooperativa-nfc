@@ -5,7 +5,7 @@
 //  - Zuki Pay escucha en $PORT (lo único público). WAHA escucha solo en 127.0.0.1:$WAHA_INTERNAL_PORT (3001).
 //  - Si Zuki Pay se cae, se cae el contenedor y Render lo reinicia. Si WAHA se cae, se reinicia solo WAHA.
 //  - Memoria (plan de 512 MB): heap de WAHA limitado (WAHA_MAX_OLD_SPACE_MB, 128) y, si el contenedor pasa de
-//    WAHA_MEM_RESTART_MB (490), se reinicia WAHA para proteger los cobros (la sesión sigue en disco, no se reescanea).
+//    WAHA_MEM_RESTART_MB (490) según el cgroup (como lo mide Render; si no hay, PSS), se reinicia WAHA para proteger los cobros (la sesión sigue en disco, no se reescanea).
 //  - La sesión de WhatsApp se respalda cifrada en Turso (si hay TURSO_*) y se restaura al arrancar, para no
 //    tener que escanear el QR después de cada deploy.
 // WAHA_EMBEDDED=0 desactiva WAHA aquí (por ejemplo, si algún día se usa un servicio aparte con WAHA_URL).
@@ -40,7 +40,30 @@ function get(url, headers = {}) {
   });
 }
 
-// Memoria (RSS) de este proceso y todos sus hijos (WAHA y GOWS), leída de /proc.
+// Memoria del contenedor como la cuenta Render (cgroup: uso menos caché de archivos inactiva).
+// Si no hay cgroup legible, se suma PSS (o RSS) de este proceso y sus hijos. Sumar RSS cuenta doble
+// las páginas compartidas: con un número vinculado daba ≈ 490 MB cuando Render marcaba ≈ 343 MB.
+function readNum(file) { try { const v = Number(fs.readFileSync(file, 'utf8').trim()); return Number.isFinite(v) ? v : null; } catch (_) { return null; } }
+function statField(file, key) {
+  try { const m = new RegExp('^' + key + ' (\\d+)$', 'm').exec(fs.readFileSync(file, 'utf8')); return m ? Number(m[1]) : 0; } catch (_) { return 0; }
+}
+function cgroupMb() {
+  const root = env.CGROUP_ROOT || '/sys/fs/cgroup';
+  let used = readNum(root + '/memory.current'); let inactive = 0;
+  if (used !== null) inactive = statField(root + '/memory.stat', 'inactive_file');
+  else {
+    used = readNum(root + '/memory/memory.usage_in_bytes');
+    if (used !== null) inactive = statField(root + '/memory/memory.stat', 'total_inactive_file');
+  }
+  if (used === null || used <= 0 || used > 1e15) return null;
+  return Math.round(Math.max(0, used - inactive) / 1048576);
+}
+function memoryMb() {
+  if (env.MEM_SOURCE !== 'proc') { const c = cgroupMb(); if (c !== null) return { mb: c, src: 'cgroup' }; }
+  const t = treeRssMb(); return t === null ? null : { mb: t.mb, src: t.src };
+}
+
+// Memoria (PSS, o RSS si no hay smaps_rollup) de este proceso y todos sus hijos (WAHA y GOWS), leída de /proc.
 function treeRssMb() {
   try {
     const parent = new Map(); const rss = new Map();
@@ -53,8 +76,14 @@ function treeRssMb() {
     }
     const mine = new Set([process.pid]); let grew = true;
     while (grew) { grew = false; for (const [p, pp] of parent) if (!mine.has(p) && mine.has(pp)) { mine.add(p); grew = true; } }
-    let kb = 0; for (const p of mine) kb += rss.get(p) || 0;
-    return Math.round(kb / 1024);
+    let kb = 0; let pss = true;
+    for (const p of mine) {
+      let v = null;
+      try { const m = /^Pss:\s+(\d+)/m.exec(fs.readFileSync(`/proc/${p}/smaps_rollup`, 'utf8')); if (m) v = Number(m[1]); } catch (_) { /* sin smaps_rollup */ }
+      if (v === null) { pss = false; v = rss.get(p) || 0; }
+      kb += v;
+    }
+    return { mb: Math.round(kb / 1024), src: pss ? 'pss' : 'rss' };
   } catch (_) { return null; }
 }
 
@@ -142,9 +171,10 @@ function watchSession() {
 function watchMemory() {
   let n = 0;
   const t = setInterval(() => {
-    const mb = treeRssMb();
-    if (mb === null) return;
-    if (++n % 20 === 0) console.log(`[memoria] Contenedor ≈ ${mb} MB (Zuki Pay + WhatsApp)`);
+    const m = memoryMb();
+    if (m === null) return;
+    const mb = m.mb;
+    if (++n % 20 === 0) console.log(`[memoria] Contenedor ≈ ${mb} MB (Zuki Pay + WhatsApp, ${m.src})`);
     // Solo si WAHA ya lleva un rato arriba (al arrancar hay un pico) y máximo 3 veces por hora.
     if (mb > MEM_RESTART_MB && waha && !stopping && Date.now() - waha.startedAt > MEM_MIN_UPTIME_MS && recent(memRestarts, 3600e3) < 3) {
       memRestarts.push(Date.now());
