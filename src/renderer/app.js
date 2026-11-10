@@ -2643,6 +2643,10 @@
       h('div', { class: 'row' }, h('h2', { class: 'grow', style: { margin: 0 } }, 'Número de WhatsApp'), statusLbl),
       h('p', { class: 'small muted' }, info.configured ? (connected ? 'Conectado' + (conn.me ? ` como ${conn.me}` : '') + '. Los mensajes salen desde este número.' : 'Todavía no hay un número conectado.') : 'El servidor todavía no tiene WhatsApp activado (falta WAHA_API_KEY). Hasta entonces no se envía ningún mensaje.'),
       conn.status === 'unreachable' ? h('p', { class: 'small muted' }, 'El servicio de WhatsApp está arrancando o reiniciándose. Espere un minuto y actualice.') : null,
+      connected && conn.reachout_limit && conn.reachout_limit.active ? h('div', { class: 'banner warn small' }, h('span', { class: 'ico' }, '⏳'),
+        h('div', null, 'WhatsApp limitó por un tiempo los mensajes a números que nunca han escrito a la academia',
+          conn.reachout_limit.ends_at ? ` (hasta ${new Date(conn.reachout_limit.ends_at).toLocaleString('es-MX', { timeZone: 'America/Mexico_City', dateStyle: 'medium', timeStyle: 'short' })})` : '',
+          '. Los tutores que ya le han escrito sí reciben mensajes. Pida a los demás que guarden el número y le envíen un «Hola». No desvincule el número: el límite se quita solo.')) : null,
       info.configured && info.can_link ? h('div', { class: 'row acts-wrap' },
         connected ? h('button', { class: 'btn danger sm', onclick: unlink }, 'Desvincular')
           : [h('button', { class: 'btn primary', onclick: startLink }, '📱 Vincular WhatsApp'), h('button', { class: 'btn', onclick: pair }, 'Vincular con código')],

@@ -107,3 +107,28 @@ test('mensaje de prueba: usa el chatId 521 y una prueba fallida se puede reinten
   assert.deepEqual(sent, ['5215658629519@c.us']);
   await assert.rejects(() => S.whatsapp.methods.waSendTest(admin, { phone: '5658629519' }), (e) => e.code === 'LIMITE');
 });
+
+test('error 463 (reach-out timelock): mensaje claro en español y estado del límite', async () => {
+  const W = fakeWaha({ registered: { '524439904367': '524439904367@c.us' }, sendError: { '524439904367@c.us': '2 UNKNOWN: server returned error 463' } });
+  const c = createWahaClient({ env, fetchImpl: W.fetchImpl });
+  const r = await c.sendText('+524439904367', 'hola');
+  assert.equal(r.ok, false); assert.equal(r.reachout, true);
+  assert.match(r.error, /WhatsApp bloqueó el primer mensaje a este número \(error 463\)/);
+  assert.match(r.error, /«Hola»/);
+  assert.equal(W.sends().length, 1, 'no reintenta con otro prefijo');
+  // Estado de la sesión con límite activo
+  const st = createWahaClient({ env, fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ status: 'WORKING', me: { id: '1@c.us', reachoutTimelock: { isActive: true, timeEnforcementEnds: 1784477333 } } }) }) });
+  const s = await st.sessionStatus();
+  assert.deepEqual(s.reachout_limit, { active: true, ends_at: new Date(1784477333000).toISOString() });
+  const st2 = createWahaClient({ env, fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ status: 'WORKING', me: { id: '1@c.us' } }) }) });
+  assert.equal((await st2.sessionStatus()).reachout_limit, null);
+});
+
+test('los logs del correo de prueba no muestran contraseñas, tokens ni el número completo', async () => {
+  const { consoleMailer } = require('../src/core/auth');
+  const lines = []; const m = consoleMailer((x) => lines.push(x));
+  await m.send({ to: '4439904367', subject: 'Tu cuenta de Zuki Pay', text: 'Hola. Tu usuario es pepe y tu contraseña temporal es bcb9gm6mpn. Entra en https://x.test/reset?token=abcdef123' });
+  assert.doesNotMatch(lines[0], /bcb9gm6mpn/); assert.doesNotMatch(lines[0], /abcdef123/); assert.doesNotMatch(lines[0], /4439904367/);
+  assert.match(lines[0], /443\*\*\*\*67/);
+  assert.match(m.outbox[0].text, /bcb9gm6mpn/, 'el mensaje real no se altera');
+});
