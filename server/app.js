@@ -156,7 +156,17 @@ async function createServer(opts = {}) {
   app.post('/api/auth/redeem', authenticate(), requireRole('tutor'), (req, res) => send(res, () => auth.redeemInvitation(req.user, req.body.code)));
 
   // ----- administración de cuentas -----
-  app.post('/api/admin/tutors', authenticate(), requireRole('admin'), (req, res) => send(res, () => auth.createTutorAccount(req.user, req.body || {})));
+  app.post('/api/admin/tutors', authenticate(), requireRole('admin'), (req, res) => {
+    const body = req.body || {};
+    if (body.as_swimmer && sync.isSynced(req.user.school_id)) {
+      return res.status(409).json({ ok: false, error: 'Este servidor está sincronizado con la caja de escritorio: los alumnos se registran en la caja.', code: 'SOLO_ESCRITORIO' });
+    }
+    return send(res, async () => {
+      const r = await auth.createTutorAccount(req.user, body);
+      if (r.swimmer) security.audit(req.user, 'alumno_creado', { ip: req.ip, target_type: 'child', target_id: r.swimmer.id, details: { alumno: r.swimmer.full_name, propio_tutor: true } });
+      return r;
+    });
+  });
   app.post('/api/admin/invitations', authenticate(), requireRole('admin'), (req, res) => send(res, () => auth.createInvitation(req.user, req.body.child_id, { reuse: !!req.body.reuse })));
   app.get('/api/admin/invitations', authenticate(), requireRole('admin'), (req, res) => send(res, () => auth.listInvitations(req.user)));
   // Hoja de códigos para padres (Programar tarjetas → paso 3), en línea desde la web o la caja de escritorio

@@ -327,7 +327,7 @@ test('el HTML de inicio deja #app vacío hasta que el renderer pinte', () => {
   assert.match(html.text, /<title>Zuki Pay<\/title>/);
   assert.ok(html.text.indexOf('/install-gate.js') < html.text.indexOf('/coop-web.js'));
   assert.ok(html.text.indexOf('/coop-web.js') < html.text.indexOf('/app.js'));
-  assert.match(swSrc.text, /coop-v24/);
+  assert.match(swSrc.text, /coop-v25/);
   assert.match(swSrc.text, /'\/app\.js'/);
   assert.match(appSrc.text, /brand-school/);
   assert.match(appSrc.text, /brand-user/);
@@ -386,12 +386,12 @@ test('token guardado que el servidor rechaza vuelve al acceso y no deja #app vac
   } finally { page.stop(); }
 });
 
-test('la caché nueva borra la cáscara coop-v23 y guarda un app.js que parsea', async () => {
+test('la caché nueva borra la cáscara coop-v24 y guarda un app.js que parsea', async () => {
   const handlers = {};
   const stores = new Map();
   const openStore = (name) => { if (!stores.has(name)) stores.set(name, new Map()); return stores.get(name); };
-  openStore('coop-v23').set('/app.js', 'this is not valid ((((');
-  openStore('coop-v23').set('/', '<div id="app"></div>');
+  openStore('coop-v24').set('/app.js', 'this is not valid ((((');
+  openStore('coop-v24').set('/', '<div id="app"></div>');
   const ctx = {
     self: { addEventListener: (n, h) => { handlers[n] = h; }, skipWaiting() {}, clients: { claim() {} }, location: { origin: base } },
     caches: {
@@ -425,9 +425,9 @@ test('la caché nueva borra la cáscara coop-v23 y guarda un app.js que parsea',
   vm.runInNewContext(swSrc.text, ctx);
   let installP; handlers.install({ waitUntil: (p) => { installP = p; } }); await installP;
   let activateP; handlers.activate({ waitUntil: (p) => { activateP = p; } }); await activateP;
-  assert.deepEqual([...stores.keys()], ['coop-v24']);
-  const cached = stores.get('coop-v24').get('/app.js');
+  assert.deepEqual([...stores.keys()], ['coop-v25']);
+  const cached = stores.get('coop-v25').get('/app.js');
   new vm.Script(cached, { filename: 'cached-app.js' });
   assert.match(cached, /brand-school/);
-  assert.equal(stores.has('coop-v23'), false);
+  assert.equal(stores.has('coop-v24'), false);
 });

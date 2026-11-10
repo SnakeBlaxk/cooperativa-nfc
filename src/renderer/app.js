@@ -52,13 +52,31 @@
   }
   async function safe(fn) { try { return await fn(); } catch (e) { toast(e.message, 'err'); return undefined; } }
   function modal(title, body, actions) {
+    // Encabezado fijo (título + cerrar), cuerpo con scroll y pie fijo con los botones.
+    // En celular se ajusta al alto visible cuando aparece el teclado (visualViewport).
     const bg = h('div', { class: 'modal-bg' });
-    const close = () => bg.remove();
-    const acts = (actions || [{ label: 'Cerrar' }]).map((a) => h('button', {
-      class: 'btn ' + (a.class || ''), onclick: async () => { if (a.onClick) { const keep = await a.onClick(close); if (keep === false) return; } close(); },
-    }, a.label));
-    bg.appendChild(h('div', { class: 'modal' }, h('h2', null, title), body, h('div', { class: 'actions' }, acts)));
+    const vv = window.visualViewport;
+    const fit = () => { if (vv) bg.style.setProperty('--vvh', vv.height + 'px'); };
+    const onKey = (e) => { if (e.key === 'Escape' && bg === [...document.querySelectorAll('.modal-bg')].pop()) close(); };
+    const close = () => { bg.remove(); if (vv) vv.removeEventListener('resize', fit); document.removeEventListener('keydown', onKey); };
+    let busy = false;
+    const acts = (actions || [{ label: 'Cerrar' }]).map((a) => {
+      const b = h('button', { class: 'btn ' + (a.class || ''), type: 'button', onclick: async () => {
+        if (busy) return; // evita doble envío (doble toque en Guardar)
+        busy = true; b.disabled = true;
+        try { if (a.onClick) { const keep = await a.onClick(close); if (keep === false) return; } close(); } finally { busy = false; b.disabled = false; }
+      } }, a.label);
+      return b;
+    });
+    const bodyEl = h('div', { class: 'modal-body' }, body);
+    bg.appendChild(h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+      h('div', { class: 'modal-head' }, h('h2', null, title), h('button', { class: 'modal-x', type: 'button', 'aria-label': 'Cerrar', onclick: close }, '×')),
+      bodyEl, h('div', { class: 'actions' }, acts)));
     bg.addEventListener('mousedown', (e) => { if (e.target === bg) close(); });
+    // Al enfocar un campo con el teclado abierto, que quede a la vista
+    bodyEl.addEventListener('focusin', (e) => { if (vv && vv.height < window.innerHeight - 80) setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 250); });
+    if (vv) { vv.addEventListener('resize', fit); fit(); }
+    document.addEventListener('keydown', onKey);
     document.body.appendChild(bg);
     const f = bg.querySelector('input,select,textarea'); if (f) setTimeout(() => f.focus(), 30);
     return close;
@@ -68,6 +86,8 @@
       modal(title, h('p', null, text), [{ label: 'Cancelar', onClick: () => res(false) }, { label: 'Confirmar', class: 'primary', onClick: () => res(true) }]);
     });
   }
+  // Sección de formulario con encabezado pequeño (p. ej. "Datos del nadador")
+  function fsec(title, ...children) { return h('section', { class: 'fsec' }, title ? h('div', { class: 'fsec-h' }, title) : null, h('div', { class: 'form' }, children)); }
   function field(label, input, hint) { return h('label', null, label, input, hint ? h('span', { class: 'hint' }, hint) : null); }
   // WhatsApp opcional: si se deja vacío se usa el teléfono
   function waField(input) { return field('WhatsApp (opcional)', input, 'Si lo dejas vacío, se usa el mismo que el teléfono. México, 10 dígitos.'); }
@@ -906,19 +926,42 @@
         wa.value = t ? (t.whatsapp || '') : '';
       };
       tutor.addEventListener('change', syncContact); syncContact();
-      modal(c ? 'Editar alumno' : 'Nuevo alumno', h('div', { class: 'form' }, field('Nombre completo', name), field('Grado y grupo', grade), field('Tutor', tutor),
-        h('div', { class: 'grid g2' }, field('Teléfono del tutor', phone, 'México, 10 dígitos.'), waField(wa)),
-        nat ? h('div', { class: 'grid g2' }, field('Días por semana', dias), field('Fecha de inicio', inicio, 'Cada mes vence este mismo día.')) : null,
-        nat ? h('label', { class: 'check' }, inscOk, 'Inscripción pagada') : null,
-        primerOk ? h('label', { class: 'check', title: 'Registra el pago de la primera mensualidad con la fecha de inicio; el siguiente vencimiento es un mes después.' }, primerOk, 'Primer mes pagado') : null,
-        h('div', { class: 'row' }, prev, field('Foto (opcional)', file), h('button', { class: 'btn sm', onclick: () => { photo = null; setPrev(); } }, 'Quitar foto')),
-        c ? h('label', { class: 'check' }, active, 'Alumno activo') : null),
+      // Adulto que es su propio tutor (solo al dar de alta, en la web): se crea su cuenta con su nombre y teléfono,
+      // vinculada a él mismo, y los recordatorios le llegan a su WhatsApp.
+      const canSelf = !c && WEB;
+      const selfOk = canSelf ? h('input', { type: 'checkbox' }) : null;
+      const sPhone = h('input', { type: 'tel', placeholder: '10 dígitos', autocomplete: 'tel' });
+      const sWa = h('input', { type: 'tel', placeholder: 'Mismo que el teléfono' });
+      const sEmail = h('input', { type: 'email', placeholder: 'Opcional', autocomplete: 'email' });
+      const tutorBox = h('div', { class: 'form' }, field('Tutor', tutor), h('div', { class: 'grid g2' }, field('Teléfono del tutor', phone, 'México, 10 dígitos.'), waField(wa)));
+      const selfBox = h('div', { class: 'form', hidden: true },
+        h('div', { class: 'banner info small' }, h('span', { class: 'ico' }, '🏊'), h('div', null, 'Se crea su cuenta de tutor con su mismo nombre y una contraseña temporal. Los recordatorios de mensualidad le llegan a su WhatsApp.')),
+        h('div', { class: 'grid g2' }, field('Teléfono', sPhone, 'México, 10 dígitos.'), waField(sWa)), field('Correo (opcional)', sEmail));
+      if (selfOk) selfOk.addEventListener('change', () => { tutorBox.hidden = selfOk.checked; selfBox.hidden = !selfOk.checked; });
+      modal(c ? 'Editar alumno' : 'Nuevo alumno', h('div', null,
+        fsec('Datos del alumno', field('Nombre completo', name), field('Grado y grupo', grade),
+          h('div', { class: 'photo-row' }, prev, field('Foto (opcional)', file), photo || c ? h('button', { class: 'btn sm', type: 'button', onclick: () => { photo = null; setPrev(); } }, 'Quitar') : null),
+          c ? h('label', { class: 'check' }, active, 'Alumno activo') : null),
+        fsec('Tutor y contacto', selfOk ? h('label', { class: 'check' }, selfOk, 'El alumno es su propio tutor (adulto)') : null, tutorBox, selfBox),
+        nat ? fsec('Mensualidad', h('div', { class: 'grid g2' }, field('Días por semana', dias), field('Fecha de inicio', inicio, 'Cada mes vence este mismo día.')),
+          h('label', { class: 'check' }, inscOk, 'Inscripción pagada'),
+          primerOk ? h('label', { class: 'check', title: 'Registra el pago de la primera mensualidad con la fecha de inicio; el siguiente vencimiento es un mes después.' }, primerOk, 'Primer mes pagado') : null) : null),
       [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
         try {
+          const planData = nat ? { dias_semana: dias.value ? Number(dias.value) : null, fecha_inicio: inicio.value || null, inscripcion_pagada: inscOk.checked, ...(primerOk && primerOk.checked ? { primer_mes_pagado: true } : {}) } : {};
+          if (selfOk && selfOk.checked) {
+            if (!sPhone.value.trim() && !sEmail.value.trim()) throw new Error('Indique el teléfono (o correo) del alumno para crear su cuenta.');
+            const r = await window.coop.auth.createTutor({ full_name: name.value, phone: sPhone.value || null, whatsapp: sWa.value || null, email: sEmail.value || null,
+              as_swimmer: { grade: grade.value || null, photo, ...planData } });
+            if (!r.ok) throw new Error(r.error);
+            toast('Alumno y cuenta creados', 'ok'); render();
+            passShownModal('Cuenta creada', r.data.user, r.data.temporary_password);
+            return;
+          }
           const data = { full_name: name.value, grade: grade.value, tutor_id: tutor.value ? Number(tutor.value) : null, photo };
           if (tutor.value) { data.tutor_phone = phone.value; data.tutor_whatsapp = wa.value; }
           const saved = c ? await call('updateChild', { id: c.id, ...data, active: active.checked }) : await call('createChild', data);
-          if (nat) await call('mensSetPlan', { child_id: saved.id, dias_semana: dias.value ? Number(dias.value) : null, fecha_inicio: inicio.value || null, inscripcion_pagada: inscOk.checked, ...(primerOk && primerOk.checked ? { primer_mes_pagado: true } : {}) });
+          if (nat) await call('mensSetPlan', { child_id: saved.id, ...planData });
           toast('Alumno guardado', 'ok'); render();
         } catch (e) { toast(e.message, 'err'); return false; }
       } }]);
@@ -955,7 +998,7 @@
         h('button', { class: 'btn sm danger', title: 'Eliminar papá/tutor', onclick: () => deleteTutorFlow(t, call, render) }, 'Eliminar papá/tutor')))));
     put(main,
       pageHead('Alumnos y padres', 'Una lista a la vez. Alumnos con tarjeta y saldo, o padres y tutores vinculados.',
-        h('button', { class: 'btn sm', onclick: () => (WEB ? tutorTempModal() : editTutor(null)) }, '+ Tutor'),
+        h('button', { class: 'btn sm', onclick: () => (WEB ? tutorTempModal({ prices: mensPrices }) : editTutor(null)) }, '+ Tutor'),
         h('button', { class: 'btn primary sm', onclick: () => editChild(null) }, '+ Alumno')),
       h('div', { class: 'toolbar' },
         h('div', { class: 'tabs', role: 'tablist' },
@@ -977,13 +1020,32 @@
       h('p', { class: 'small muted' }, `Vence: ${fmtDate(r.data.expires_at)}. Generar uno nuevo invalida el anterior. Dirección: ${location.origin}`)));
   }
   // Alta de tutor con contraseña temporal generada por el servidor (se envía por correo/SMS)
-  function tutorTempModal() {
-    const name = h('input'); const email = h('input', { type: 'email' }); const phone = h('input', { type: 'tel', placeholder: '10 dígitos' }); const wa = h('input', { type: 'tel', placeholder: 'Mismo que el teléfono' });
-    modal('Nueva cuenta de tutor', h('div', { class: 'form' }, h('p', { class: 'small muted' }, 'Se genera una contraseña automáticamente. El tutor entra con su correo o teléfono.'),
-      field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Correo', email), field('Teléfono', phone)), waField(wa)),
+  function tutorTempModal({ prices = {} } = {}) {
+    const name = h('input', { autocomplete: 'name' }); const email = h('input', { type: 'email', autocomplete: 'email' }); const phone = h('input', { type: 'tel', placeholder: '10 dígitos', autocomplete: 'tel' }); const wa = h('input', { type: 'tel', placeholder: 'Mismo que el teléfono' });
+    // Natación: el tutor también puede ser nadador (adulto). Se crea el nadador con su mismo nombre, vinculado a esta cuenta.
+    const nat = isNatacion();
+    const swOk = nat ? h('input', { type: 'checkbox' }) : null;
+    const grade = h('input', { placeholder: 'p. ej. 3° A' });
+    const dias = h('select', null, h('option', { value: '' }, '— Sin mensualidad —'), [1, 2, 3, 4, 5, 6].map((d) => h('option', { value: d }, `${d} día${d > 1 ? 's' : ''} por semana${prices[d] !== undefined ? ' · ' + money(prices[d]) + '/mes' : ''}`)));
+    const inicio = h('input', { type: 'date' });
+    const inscOk = h('input', { type: 'checkbox' }); const primerOk = h('input', { type: 'checkbox' });
+    const swBox = h('div', { hidden: true, style: { marginTop: '22px' } },
+      fsec('Datos del alumno', field('Grado y grupo', grade)),
+      fsec('Mensualidad', h('div', { class: 'grid g2' }, field('Días por semana', dias), field('Fecha de inicio', inicio, 'Cada mes vence este mismo día.')),
+        h('label', { class: 'check' }, inscOk, 'Inscripción pagada'),
+        h('label', { class: 'check', title: 'Registra el pago de la primera mensualidad con la fecha de inicio; el siguiente vencimiento es un mes después.' }, primerOk, 'Primer mes pagado')));
+    if (swOk) swOk.addEventListener('change', () => { swBox.hidden = !swOk.checked; });
+    modal('Nueva cuenta de tutor', h('div', null,
+      fsec('Tutor y contacto', h('p', { class: 'small muted', style: { margin: 0 } }, 'Se genera una contraseña automáticamente. El tutor entra con su correo o teléfono.'),
+        field('Nombre completo', name), h('div', { class: 'grid g2' }, field('Teléfono', phone), field('Correo', email)), waField(wa),
+        swOk ? h('label', { class: 'check' }, swOk, 'Este tutor también es alumno') : null),
+      swOk ? swBox : null),
     [{ label: 'Cancelar' }, { label: 'Crear cuenta', class: 'primary', onClick: async () => {
-      const r = await window.coop.auth.createTutor({ full_name: name.value, email: email.value || null, phone: phone.value || null, whatsapp: wa.value || null });
+      const body = { full_name: name.value, email: email.value || null, phone: phone.value || null, whatsapp: wa.value || null };
+      if (swOk && swOk.checked) body.as_swimmer = { grade: grade.value || null, dias_semana: dias.value ? Number(dias.value) : null, fecha_inicio: inicio.value || null, inscripcion_pagada: inscOk.checked, ...(primerOk.checked ? { primer_mes_pagado: true } : {}) };
+      const r = await window.coop.auth.createTutor(body);
       if (!r.ok) { toast(r.error, 'err'); return false; }
+      if (r.data.swimmer) toast('Cuenta y alumno creados', 'ok');
       passShownModal('Cuenta creada', r.data.user, r.data.temporary_password);
     } }]);
   }
@@ -994,11 +1056,13 @@
     const name = h('input', { value: u ? u.full_name : '' }); const phone = h('input', { value: u ? u.phone || '' : '', type: 'tel' }); const wa = h('input', { value: u ? u.whatsapp || '' : '', type: 'tel', placeholder: 'Mismo que el teléfono' }); const email = h('input', { value: u ? u.email || '' : '', type: 'email' });
     const pass = h('input', { type: 'password', placeholder: 'Mínimo 6 caracteres', autocomplete: 'new-password' });
     const active = h('input', { type: 'checkbox', checked: u ? u.active : true });
-    modal(u ? 'Editar usuario' : 'Nuevo usuario', h('div', { class: 'form' }, field('Puesto', role), field('Usuario (para iniciar sesión)', username), field('Nombre completo', name),
-      h('div', { class: 'grid g2' }, field('Teléfono', phone), field('Correo', email)), waField(wa),
-      u ? h('div', { class: 'banner info small' }, h('span', { class: 'ico' }, '🔑'), h('div', null, 'Las contraseñas solo las cambia el administrador de la plataforma (Zuki Company).'))
-        : field('Contraseña inicial', pass, 'Désela a la persona. Si la olvida, el administrador de la plataforma le asigna otra.'),
-      u ? h('label', { class: 'check' }, active, 'Cuenta activa (puede entrar)') : null),
+    const isTutor = (u ? u.role : fixedRole) === 'tutor';
+    modal(u ? (isTutor ? 'Editar tutor' : 'Editar usuario') : (isTutor ? 'Nuevo tutor' : 'Nuevo usuario'), h('div', null,
+      fsec('Cuenta', field('Puesto', role), field('Usuario (para iniciar sesión)', username), field('Nombre completo', name),
+        u ? h('div', { class: 'banner info small' }, h('span', { class: 'ico' }, '🔑'), h('div', null, 'Las contraseñas solo las cambia el administrador de la plataforma (Zuki Company).'))
+          : field('Contraseña inicial', pass, 'Désela a la persona. Si la olvida, el administrador de la plataforma le asigna otra.'),
+        u ? h('label', { class: 'check' }, active, 'Cuenta activa (puede entrar)') : null),
+      fsec('Contacto', h('div', { class: 'grid g2' }, field('Teléfono', phone), field('Correo', email)), waField(wa))),
     [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
       try {
         if (u) await call('updateUser', { id: u.id, full_name: name.value, phone: phone.value, whatsapp: wa.value, email: email.value, active: active.checked });

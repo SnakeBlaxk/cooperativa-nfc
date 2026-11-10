@@ -53,6 +53,7 @@ function greet(name) {
   const tutor = firstName(name);
   return tutor ? `Hola ${tutor}` : 'Hola';
 }
+const norm = (x) => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
 function reminderText({ tutorName, childName, amountCents, nextDue, status, daysLeft, schoolName }) {
   const lugar = schoolName || 'la academia';
   const hijo = childName || 'su hijo(a)';
@@ -65,7 +66,9 @@ function reminderText({ tutorName, childName, amountCents, nextDue, status, days
   } else if (Number(daysLeft) <= 0) cuando = `vence hoy (${fecha})`;
   else if (Number(daysLeft) === 1) cuando = `vence mañana (${fecha})`;
   else cuando = `vence el ${fecha} (en ${daysLeft} días)`;
-  return `${greet(tutorName)}, le escribimos de ${lugar}. La mensualidad de ${hijo} es de ${monto} y ${cuando}. Puede pasar a pagarla en recepción cuando guste. Gracias.`;
+  // Adulto que es su propio tutor: "Su mensualidad" en vez de "La mensualidad de <nombre>".
+  const self = !!childName && norm(tutorName) === norm(childName);
+  return `${greet(tutorName)}, le escribimos de ${lugar}. ${self ? 'Su mensualidad' : `La mensualidad de ${hijo}`} es de ${monto} y ${cuando}. Puede pasar a pagarla en recepción cuando guste. Gracias.`;
 }
 
 function noticeText({ tutorName, childName, kind, title, body, schoolName }) {
