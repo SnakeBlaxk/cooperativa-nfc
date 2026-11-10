@@ -15,6 +15,7 @@ const { createSyncServer } = require('../src/core/sync-server');
 const { createSecurity } = require('../src/core/security');
 const { createBilling } = require('../src/core/billing');
 const { createPush } = require('../src/core/push');
+const { createWhatsApp } = require('../src/core/whatsapp');
 const { createRemovals } = require('../src/core/removals');
 
 // Métodos que, con una caja VIEJA sincronizada (solo si LEGACY_SYNC=1), se hacían solo en el escritorio.
@@ -66,8 +67,15 @@ async function createServer(opts = {}) {
   }
   const auth = createAuth(db, svc, { jwtSecret: secret, mailer: opts.mailer || consoleMailer(), appUrl: opts.appUrl || process.env.APP_URL, onChildLinked: (id) => sync.recordChild('child_link', id), security, billing, ...(opts.authOptions || {}) });
 
-  // Notificaciones Web Push para padres (opts.pushSender permite simular el envío en pruebas)
-  const push = createPush(db, { svc, sender: opts.pushSender, env: opts.env || process.env });
+  // WhatsApp (WAHA, no Meta). Sin WAHA_URL/WAHA_API_KEY no envía nada.
+  const env = opts.env || process.env;
+  const whatsapp = createWhatsApp(db, {
+    env, fetchImpl: opts.wahaFetch, now: opts.now, delayMs: opts.wahaDelayMs, sleep: opts.wahaSleep, nowMs: opts.wahaNowMs,
+    audit: (actor, action, o) => security.audit(actor, action, o),
+  });
+  // Notificaciones Web Push para padres (opts.pushSender permite simular el envío en pruebas).
+  // Los mismos avisos se copian a WhatsApp cuando la escuela lo tiene activo y el tutor tiene teléfono.
+  const push = createPush(db, { svc, sender: opts.pushSender, env, onNotice: (n) => whatsapp.mirrorNotice(n) });
   const platform = createPlatform(db, { svc, sync, auth, security, billing });
   // Bajas de alumnos y papás/tutores con Papelera (administrador de la escuela; el superadmin usa /api/super)
   const removals = createRemovals(db, { security, now: opts.now });
@@ -75,6 +83,9 @@ async function createServer(opts = {}) {
   try { billing.sweep(); } catch (e) { console.error('[mensualidad]', e); }
   const sweepMs = opts.billingSweepMs === undefined ? 15 * 60 * 1000 : opts.billingSweepMs;
   if (sweepMs > 0) { const t = setInterval(() => { try { billing.sweep(); } catch (e) { console.error('[mensualidad]', e); } }, sweepMs); if (t.unref) t.unref(); }
+  // Recordatorios diarios de mensualidad (una revisión por minuto; cada escuela sale a su hora, Ciudad de México).
+  const waMs = opts.whatsappSweepMs === undefined ? 60 * 1000 : opts.whatsappSweepMs;
+  if (waMs > 0) { const t = setInterval(() => { whatsapp.tick(); }, waMs); if (t.unref) t.unref(); }
   const app = express();
   app.disable('x-powered-by');
   if (opts.trustProxy || process.env.TRUST_PROXY) app.set('trust proxy', 1);
@@ -193,6 +204,12 @@ async function createServer(opts = {}) {
   app.post('/api/sync/invitations', deviceAuth, (req, res) => send(res, () => auth.invitationsForSchool(req.device.school_id, (req.body || {}).child_uuids, { reuse: true, skipLinked: (req.body || {}).include_linked ? false : true })));
 
   // ----- panel del superadministrador (Zuki Company) -----
+  // WhatsApp (conexión del número) para el superadministrador
+  app.post('/api/super-wa/:method', authenticate(), requireRole('superadmin'), (req, res) => {
+    const m = req.params.method;
+    if (!Object.prototype.hasOwnProperty.call(whatsapp.superMethods, m)) return res.status(404).json({ ok: false, error: 'Ruta no encontrada', code: 'NO_ENCONTRADO' });
+    return send(res, () => whatsapp.superMethods[m](req.user, req.body || {}));
+  });
   app.post('/api/super/:method', authenticate(), requireRole('superadmin'), (req, res) => send(res, () => platform.handle(req.user, req.params.method, req.body || {}, ctx(req))));
   // Respaldo descargable de toda la base (archivo SQLite)
   app.get('/api/super-backup', authenticate(), requireRole('superadmin'), (req, res) => {
@@ -217,6 +234,7 @@ async function createServer(opts = {}) {
     }
     const args = req.body || {};
     try { security.guard(req.user, method, args, ctx(req)); } catch (e) { return res.status(STATUS[e.code] || 423).json({ ok: false, error: e.message, code: e.code }); }
+    if (Object.prototype.hasOwnProperty.call(whatsapp.methods, method)) return send(res, () => whatsapp.methods[method](req.user, args));
     if (Object.prototype.hasOwnProperty.call(removals.methods, method)) {
       if (['purgeChild', 'purgeTutor', 'purgeStaff', 'previewDeleteStaff', 'deleteStaff', 'restoreStaff'].includes(method)) return res.status(403).json({ ok: false, error: 'Solo el superadministrador puede eliminar definitivamente', code: 'PROHIBIDO' });
       return send(res, () => removals.methods[method](req.user, args, ctx(req)));
@@ -290,6 +308,6 @@ async function createServer(opts = {}) {
   app.use(express.static(renderer, { index: false }));
   app.use('/api', (req, res) => res.status(404).json({ ok: false, error: 'Ruta no encontrada', code: 'NO_ENCONTRADO' }));
 
-  return { app, db, svc, auth, sync, platform, billing, security, push };
+  return { app, db, svc, auth, sync, platform, billing, security, push, whatsapp };
 }
 module.exports = { createServer };

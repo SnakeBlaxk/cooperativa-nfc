@@ -346,3 +346,11 @@ tr.stock-hit td { background: #d9fff1 !important; box-shadow: inset 0 2px 0 var(
   .pbtn:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(76,29,149,.12); }
   .side-toggle { transition: border-color .2s ease, background .2s ease; }
 }
+
+/* WhatsApp: QR para vincular y aviso general */
+.wa-qr { margin-top: 14px; text-align: center; animation: fadeUp .35s ease both; }
+.wa-qr img { display: block; margin: 0 auto 8px; width: min(264px, 80vw); height: auto; background: #fff; padding: 10px; border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.08); image-rendering: pixelated; }
+.wa-code { margin-top: 12px; text-align: center; }
+.wa-code-value { font-size: 1.6rem; letter-spacing: .18em; font-family: ui-monospace, Menlo, monospace; }
+.wa-preview { margin: 8px 0 0; padding: 10px 12px; border-left: 4px solid var(--ok, #25d366); background: rgba(37,211,102,.08); border-radius: 8px; white-space: pre-wrap; font-size: .92rem; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }

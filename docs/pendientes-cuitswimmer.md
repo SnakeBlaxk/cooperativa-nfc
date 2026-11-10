@@ -74,8 +74,15 @@ Inscripción: **200 MXN** (confirmado 3 nov 2026), editable en *Mensualidades �
 - Para los recordatorios por WhatsApp: RPC `mensList` con `{ status: 'vencida,por_vencer' }` devuelve
   nadador, tutor, `tutor_whatsapp`, `monthly_cents` y `next_due`.
 
+## WhatsApp automático — HECHO (WAHA, no Meta)
+- Cliente WAHA (`WAHA_URL`, `WAHA_API_KEY`, `WAHA_SESSION`). Sin esas variables no se envía nada.
+- **Configuración → WhatsApp** (administrador): activar o pausar, hora diaria en `America/Mexico_City`, estado de la sesión y enlace al QR.
+- Cada día, a esa hora: mensualidades **por vencer** o **vencidas**, un mensaje por tutor y nadador (nombre, monto, fecha). No se repite el mismo día.
+- Las mismas notificaciones que ya salen en la app (compra, compra rechazada —incluye tarjeta bloqueada—, saldo bajo) se copian por WhatsApp si el tutor tiene teléfono y los avisos están activos.
+- El teléfono del tutor se edita en el alumno (10 dígitos de México).
+- Guía de Docker / segundo servicio en Render y del QR: [`docs/whatsapp-waha.md`](whatsapp-waha.md).
+
 ## Pendiente
-- Envío de recordatorios/avisos por WhatsApp (WhatsApp Cloud API) y número de WhatsApp Business.
 - Pago por clase suelta (si se requiere).
 - (Hecho 3 nov 2026) Editar y borrar pagos registrados por error desde el historial del nadador (con confirmación; el vencimiento regresa un mes; borrado lógico con quién/cuándo).
 - (Hecho) Botón *💬 Ayuda* (administrador y cajero, todas las cuentas): panel con **Preguntas frecuentes** (buscador; adaptadas
