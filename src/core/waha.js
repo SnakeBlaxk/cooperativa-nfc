@@ -75,6 +75,11 @@ const STATUS_LABEL = {
   missing: 'Sin vincular',
 };
 
+// Error 463 de WhatsApp («reach-out timelock»): WhatsApp bloquea el primer mensaje a un número que nunca ha
+// escrito a la academia (o limita temporalmente los mensajes a números nuevos). No es un problema de la sesión.
+const REACHOUT = /\b463\b|reach-?out|timelock/i;
+const REACHOUT_MSG = 'WhatsApp bloqueó el primer mensaje a este número (error 463). Pida que guarden el número de la academia y le envíen un «Hola» por WhatsApp; luego vuelva a intentar.';
+
 function createWahaClient({ env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 20000 } = {}) {
   const apiKey = () => String(env.WAHA_API_KEY || '').trim();
   async function request(path, { method = 'GET', body } = {}) {
@@ -139,6 +144,7 @@ function createWahaClient({ env = process.env, fetchImpl = globalThis.fetch, tim
 
   async function postText(chatId, text) {
     const r = await request('/api/sendText', { method: 'POST', body: { session: sessionName(env), chatId, text: String(text || '').slice(0, 4000) } });
+    if (!r.ok && REACHOUT.test(r.error || '')) return { ok: false, chatId, reachout: true, status: r.status, error: REACHOUT_MSG };
     if (!r.ok) return { ok: false, chatId, error: r.error || 'no se pudo enviar', status: r.status };
     const id = r.data && (r.data.id || (r.data.key && r.data.key.id)) || null;
     return { ok: true, chatId, id };
@@ -169,7 +175,14 @@ function createWahaClient({ env = process.env, fetchImpl = globalThis.fetch, tim
     if (!r.ok) return { configured: true, session: sessionName(env), status: 'FAILED', status_label: STATUS_LABEL.FAILED, dashboard_url: dashboardUrl(env), error: r.error };
     const st = (r.data && r.data.status) || 'STOPPED';
     const me = r.data && r.data.me && (r.data.me.pushName || r.data.me.id) || null;
-    return { configured: true, session: sessionName(env), status: st, status_label: STATUS_LABEL[st] || st, me, dashboard_url: dashboardUrl(env) };
+    // WAHA ≥ 2026.8 informa si WhatsApp limitó los mensajes a números nuevos (me.reachoutTimelock)
+    const tl = r.data && r.data.me && r.data.me.reachoutTimelock;
+    let reachout_limit = null;
+    if (tl && tl.isActive) {
+      const ends = Number(tl.timeEnforcementEnds);
+      reachout_limit = { active: true, ends_at: Number.isFinite(ends) && ends > 0 ? new Date(ends * (ends < 1e12 ? 1000 : 1)).toISOString() : null };
+    }
+    return { configured: true, session: sessionName(env), status: st, status_label: STATUS_LABEL[st] || st, me, reachout_limit, dashboard_url: dashboardUrl(env) };
   }
 
   const sessPath = () => '/api/sessions/' + encodeURIComponent(sessionName(env));
@@ -223,6 +236,6 @@ function createWahaClient({ env = process.env, fetchImpl = globalThis.fetch, tim
 }
 
 module.exports = {
-  toE164Mx, chatIdFor, baseUrl, sessionName, dashboardUrl, configured, paceMs, createWahaClient, STATUS_LABEL,
+  REACHOUT_MSG, toE164Mx, chatIdFor, baseUrl, sessionName, dashboardUrl, configured, paceMs, createWahaClient, STATUS_LABEL,
   DEFAULT_DELAY_MS, MIN_DELAY_MS, MAX_DELAY_MS,
 };

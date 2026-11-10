@@ -25,11 +25,23 @@ function tempPassword() {
 
 // Mailer enchufable: en desarrollo solo imprime en consola. En producción implementar
 // send({ to, subject, text }) con Resend, SendGrid, Amazon SES (correo) o Twilio (SMS).
+function maskTo(to) {
+  const t = String(to || '');
+  if (t.includes('@')) { const [u, d] = t.split('@'); return (u.slice(0, 2) || '') + '***@' + d; }
+  const d = t.replace(/\D/g, ''); return d.length >= 7 ? d.slice(0, 3) + '****' + d.slice(-2) : '***';
+}
+function redact(text) {
+  return String(text || '')
+    .replace(/(contrase(?:ñ|n)a(?:\s+temporal)?(?:\s+es)?\s*:?\s*)\S+/gi, '$1[oculta]')
+    .replace(/([?&](?:token|code|codigo)=)[^\s&]+/gi, '$1[oculto]')
+    .replace(/(c(?:ó|o)digo(?:\s+de\s+\w+)?(?:\s+es)?\s*:?\s*)[A-Z0-9-]{4,}/g, '$1[oculto]');
+}
 function consoleMailer(log = console.log) {
   const outbox = [];
   return {
     outbox,
-    async send(msg) { outbox.push(msg); log(`[mailer:dev] Para: ${msg.to} | ${msg.subject}\n${msg.text}`); },
+    // En la consola (logs del servidor) nunca se escriben contraseñas, enlaces con token ni el número completo.
+    async send(msg) { outbox.push(msg); log(`[mailer:dev] Para: ${maskTo(msg.to)} | ${msg.subject}\n${redact(msg.text)}`); },
   };
 }
 
