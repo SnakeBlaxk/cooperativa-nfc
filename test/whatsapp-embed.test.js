@@ -273,3 +273,25 @@ test('supervisor: si la memoria pasa el límite se reinicia solo WAHA', async ()
     assert.equal(code, 0, logs);
   } finally { if (child.exitCode === null) child.kill('SIGKILL'); }
 });
+
+test('supervisor: la vigilancia usa la memoria del cgroup (como Render), no la suma de RSS', async () => {
+  const [appPort, wahaPort] = [await freePort(), await freePort()];
+  const tmp = tmpdir('cg-');
+  const outFile = path.join(tmp, 'waha.jsonl');
+  const cg = path.join(tmp, 'cgroup'); fs.mkdirSync(cg);
+  // 700 MB usados, 300 MB de caché inactiva → 400 MB reales: por debajo de 490, no reinicia.
+  fs.writeFileSync(path.join(cg, 'memory.current'), String(700 * 1048576));
+  fs.writeFileSync(path.join(cg, 'memory.stat'), `anon 1\ninactive_file ${300 * 1048576}\nactive_file 5\n`);
+  const child = startSupervisor(appPort, wahaPort, tmp, outFile, { CGROUP_ROOT: cg, MEM_CHECK_EVERY_MS: '300', WAHA_MEM_MIN_UPTIME_MS: '500' });
+  let logs = ''; child.stdout.on('data', (d) => { logs += d; }); child.stderr.on('data', (d) => { logs += d; });
+  try {
+    await waitUntil(() => /\[memoria\] Contenedor ≈ 400 MB .*cgroup/.test(logs), 30000);
+    assert.doesNotMatch(logs, /se reinicia WAHA/);
+    // Sin caché inactiva → 700 MB reales: ahora sí reinicia solo WAHA.
+    fs.writeFileSync(path.join(cg, 'memory.stat'), 'inactive_file 0\n');
+    await waitUntil(() => /700 MB > 490 MB: se reinicia WAHA/.test(logs), 30000);
+    assert.equal((await fetch(`http://127.0.0.1:${appPort}/api/health`)).ok, true);
+    const code = await new Promise((r) => { child.once('exit', r); child.kill('SIGTERM'); });
+    assert.equal(code, 0, logs);
+  } finally { if (child.exitCode === null) child.kill('SIGKILL'); }
+});
