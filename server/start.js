@@ -4,7 +4,8 @@
 // y además vigila a WAHA como proceso hijo (así no se gasta memoria en un tercer proceso).
 //  - Zuki Pay escucha en $PORT (lo único público). WAHA escucha solo en 127.0.0.1:$WAHA_INTERNAL_PORT (3001).
 //  - Si Zuki Pay se cae, se cae el contenedor y Render lo reinicia. Si WAHA se cae, se reinicia solo WAHA.
-//  - Memoria (plan de 512 MB): heap de WAHA limitado (WAHA_MAX_OLD_SPACE_MB, 128) y, si el contenedor pasa de
+//  - Memoria (plan de 512 MB): heap de WAHA limitado (WAHA_MAX_OLD_SPACE_MB, 160), reinicio preventivo nocturno
+//    de WAHA (WAHA_NIGHTLY_HOUR, 4 a. m. CDMX) y, si el contenedor pasa de
 //    WAHA_MEM_RESTART_MB (490) según el cgroup (como lo mide Render; si no hay, PSS), se reinicia WAHA para proteger los cobros (la sesión sigue en disco, no se reescanea).
 //  - La sesión de WhatsApp se respalda cifrada en Turso (si hay TURSO_*) y se restaura al arrancar, para no
 //    tener que escanear el QR después de cada deploy.
@@ -20,7 +21,15 @@ const APP_PORT = Number(env.PORT || 3000);
 const WAHA_PORT = Number(env.WAHA_INTERNAL_PORT || 3001);
 const WAHA_ENTRY = env.WAHA_ENTRYPOINT || '/entrypoint.sh';
 const SESS_DIR = env.WAHA_LOCAL_STORE_BASE_DIR || '/app/.sessions';
-const WAHA_HEAP = Number(env.WAHA_MAX_OLD_SPACE_MB || 128);
+// 128 MB se quedó corto: tras ~7 h el heap de WAHA llegó a ~123 MB y murió por falta de memoria (13:38 del 10/11/2026).
+const WAHA_HEAP = Number(env.WAHA_MAX_OLD_SPACE_MB || 160);
+// Mantenimiento: reinicio preventivo de WAHA una vez por noche (hora CDMX) para que el heap no crezca sin fin.
+// La sesión sigue en disco (y se respalda antes), así que no hay que escanear el QR.
+const NIGHTLY = env.WAHA_NIGHTLY_RESTART !== '0';
+const NIGHTLY_HOUR = Number(env.WAHA_NIGHTLY_HOUR || 4);
+const NIGHTLY_MIN_UPTIME_MS = Number(env.WAHA_NIGHTLY_MIN_UPTIME_MS || 12 * 3600e3);
+const mxHour = (d = new Date()) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Mexico_City', hour: 'numeric', hourCycle: 'h23' }).format(d));
+const mxDay = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(d);
 const MEM_RESTART_MB = Number(env.WAHA_MEM_RESTART_MB || 490);
 const MEM_MIN_UPTIME_MS = Number(env.WAHA_MEM_MIN_UPTIME_MS || 10 * 60e3);
 const embedded = env.WAHA_EMBEDDED !== '0' && !!String(env.WAHA_API_KEY || '').trim() && fs.existsSync(WAHA_ENTRY);
@@ -126,6 +135,7 @@ function startWaha() {
     if (waha === child) waha = null;
     if (stopping) return;
     if (child.memRestart) { log('WAHA reiniciado por memoria.'); setTimeout(() => { if (!stopping) startWaha(); }, 2000).unref(); return; }
+    if (child.planned) { log('WAHA reiniciado (mantenimiento nocturno).'); setTimeout(() => { if (!stopping) startWaha(); }, 2000).unref(); return; }
     if (recent(crashes, 3600e3) >= 5) { console.error('[whatsapp] WAHA falló 5 veces en una hora; se deja apagado. Zuki Pay sigue funcionando.'); return; }
     crashes.push(Date.now());
     const wait = 5000 * crashes.length;
@@ -148,7 +158,7 @@ async function sessionStatus() {
 
 // Respaldo: ~1 min después de conectarse (para no perder el QR recién escaneado), cada 6 horas y al apagar.
 function watchSession() {
-  let last = null; let lastSave = 0; let busy = false;
+  let last = null; let lastSave = 0; let busy = false; let nightlyDay = null;
   const every = Number(env.WAHA_BACKUP_EVERY_MS || 6 * 3600e3);
   const t = setInterval(async () => {
     if (stopping || !waha || busy) return;
@@ -156,14 +166,25 @@ function watchSession() {
     try {
       const st = await sessionStatus();
       const justConnected = st === 'WORKING' && last !== 'WORKING';
+      // Aviso claro en los logs cuando WhatsApp cierra la sesión (p. ej. «Logged out» 401): hay que volver a vincular.
+      if (last === 'WORKING' && st && st !== 'WORKING') log(`La sesión dejó de estar conectada (estado ${st}). Si no vuelve sola, hay que vincular el número otra vez.`);
       last = st;
-      if (st === 'WORKING' && (justConnected || Date.now() - lastSave > every)) {
+      // Reinicio nocturno: una vez al día, a la hora indicada (CDMX), si WAHA lleva arriba suficiente tiempo.
+      if (NIGHTLY && waha && mxHour() === NIGHTLY_HOUR && nightlyDay !== mxDay() && Date.now() - waha.startedAt > NIGHTLY_MIN_UPTIME_MS) {
+        nightlyDay = mxDay();
+        if (st === 'WORKING' && backup && backup.enabled) { try { const r = await backup.save(); if (r.saved) lastSave = Date.now(); } catch (_) { /* nada */ } }
+        log('Reinicio preventivo de WAHA (mantenimiento nocturno; la sesión se conserva).');
+        waha.planned = true; last = null;
+        try { waha.kill('SIGTERM'); } catch (_) { /* nada */ }
+        return;
+      }
+      if (backup && backup.enabled && st === 'WORKING' && (justConnected || Date.now() - lastSave > every)) {
         if (justConnected) await sleep(45000); // deja que GOWS termine de guardar las llaves del vínculo
         const r = await backup.save();
         if (r.saved) { lastSave = Date.now(); log(`Sesión respaldada en Turso (${Math.round(r.bytes / 1024)} KB).`); }
       }
     } finally { busy = false; }
-  }, 30000);
+  }, Number(env.WAHA_SESSION_CHECK_MS || 30000));
   t.unref();
 }
 
@@ -216,6 +237,6 @@ async function stopWaha() {
   if (stopping) return;
   log(`Iniciando WAHA (GOWS) en 127.0.0.1:${WAHA_PORT}…`);
   startWaha();
-  if (backup.enabled) watchSession();
+  watchSession(); // respaldo (si hay Turso), aviso de sesión cerrada y reinicio nocturno
   watchMemory();
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -244,7 +244,7 @@ test('supervisor: Zuki Pay en PORT, WAHA solo en 127.0.0.1, reinicio de WAHA y a
     assert.equal(first.hasJwt, false);
     assert.equal(first.dashboard, 'false');
     assert.equal(first.engine, 'GOWS');
-    assert.match(first.nodeOptions, /--max-old-space-size=128 --max-semi-space-size=1/);
+    assert.match(first.nodeOptions, /--max-old-space-size=160 --max-semi-space-size=1/);
     // La app habla con WAHA en 127.0.0.1 sin que se ponga WAHA_URL a mano
     const tok = (await (await fetch(`http://127.0.0.1:${appPort}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: 'admin', password: 'admin123' }) })).json()).data.access_token;
     const st = await (await fetch(`http://127.0.0.1:${appPort}/api/rpc/waStatus`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: '{}' })).json();
@@ -294,4 +294,34 @@ test('supervisor: la vigilancia usa la memoria del cgroup (como Render), no la s
     const code = await new Promise((r) => { child.once('exit', r); child.kill('SIGTERM'); });
     assert.equal(code, 0, logs);
   } finally { if (child.exitCode === null) child.kill('SIGKILL'); }
+});
+
+test('supervisor: reinicio nocturno preventivo de WAHA (una vez por día, hora CDMX)', async () => {
+  const [appPort, wahaPort] = [await freePort(), await freePort()];
+  const tmp = tmpdir('night-');
+  const outFile = path.join(tmp, 'waha.jsonl');
+  const hour = String(Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Mexico_City', hour: 'numeric', hourCycle: 'h23' }).format(new Date())));
+  const child = startSupervisor(appPort, wahaPort, tmp, outFile, { WAHA_NIGHTLY_HOUR: hour, WAHA_NIGHTLY_MIN_UPTIME_MS: '1500', WAHA_SESSION_CHECK_MS: '400' });
+  let logs = ''; child.stdout.on('data', (d) => { logs += d; }); child.stderr.on('data', (d) => { logs += d; });
+  try {
+    await waitUntil(() => fs.existsSync(outFile) && fs.readFileSync(outFile, 'utf8').trim().split('\n').length >= 2, 30000);
+    assert.match(logs, /Reinicio preventivo de WAHA \(mantenimiento nocturno/);
+    assert.match(logs, /WAHA reiniciado \(mantenimiento nocturno\)/);
+    // Solo una vez por día
+    await new Promise((r) => setTimeout(r, 3000));
+    assert.equal(fs.readFileSync(outFile, 'utf8').trim().split('\n').length, 2);
+    assert.equal((await fetch(`http://127.0.0.1:${appPort}/api/health`)).ok, true);
+    const code = await new Promise((r) => { child.once('exit', r); child.kill('SIGTERM'); });
+    assert.equal(code, 0, logs);
+  } finally { if (child.exitCode === null) child.kill('SIGKILL'); }
+});
+
+test('cliente WAHA: si WAHA no responde («fetch failed»), mensaje claro en español', async () => {
+  const c = createWahaClient({ env: { WAHA_URL: 'http://127.0.0.1:3001', WAHA_API_KEY: 'k' }, fetchImpl: async () => { throw new TypeError('fetch failed'); } });
+  const r = await c.sendText('+524431112233', 'hola');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /se está reiniciando/);
+  assert.doesNotMatch(r.error, /fetch failed/);
+  const st = await c.sessionStatus();
+  assert.equal(st.status, 'unreachable');
 });
