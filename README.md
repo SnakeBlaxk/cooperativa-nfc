@@ -224,6 +224,10 @@ docs/capturas/     Capturas de pantalla
 | `ADMIN_USER`, `ADMIN_PASSWORD`, `SCHOOL_NAME` | Opcional: crea una primera escuela con su administrador. Normalmente las escuelas se crean desde el panel del superadmin. |
 | `TRUST_PROXY=1` | Detrás de un proxy (Render, Railway, Nginx) para que el límite por IP use la IP real |
 | `LEGACY_SYNC=1` | **Solo para migrar** cajas 1.x: permite unos minutos el envío de ventas sin conexión de una caja vieja (§5). Normalmente **no** se define. |
+| `WAHA_URL`, `WAHA_API_KEY`, `WAHA_SESSION` | WhatsApp por **WAHA** (WhatsApp Web / Baileys, **no** la API de Meta). Sin URL o sin llave no se envía nada. Guía: [`docs/whatsapp-waha.md`](docs/whatsapp-waha.md). |
+| `WAHA_DASHBOARD_URL` | Enlace del panel donde la academia escanea el QR (opcional; si falta se usa `WAHA_URL/dashboard`). |
+| `WAHA_SEND_DELAY_MS` | Pausa entre mensajes (20–60 s; por defecto 30 s). |
+| `WAHA_MX_PREFIX` | `52` (por defecto, E.164) o `521` si Baileys no entrega a móviles mexicanos. |
 
 ### 4b. Seguridad y emergencia (superadministrador)
 
