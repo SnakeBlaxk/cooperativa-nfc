@@ -218,14 +218,40 @@ function createAuth(db, svc, opts = {}) {
   async function createTutorAccount(actor, data) {
     if (!actor || actor.role !== 'admin') throw new AppError('No tienes permiso para esta acción', 'PROHIBIDO');
     if (!data.email && !data.phone) throw new AppError('Indica correo o teléfono del tutor', 'VALIDACION');
-    const password = tempPassword();
-    const u = svc.createUser(actor, { role: 'tutor', full_name: data.full_name, email: data.email || null, phone: data.phone || null, whatsapp: data.whatsapp || null, password });
-    if (Array.isArray(data.child_ids)) {
-      for (const cid of data.child_ids) { svc.updateChild(actor, cid, { tutor_id: u.id }); onChildLinked(Number(cid)); }
+    // Sin duplicados: si ya hay una cuenta con ese teléfono o correo, se avisa con su nombre (en lugar de
+    // "el usuario ya existe") para que la escuela la elija como tutor.
+    const ph = data.phone ? normPhone(data.phone) : null; const em = data.email ? normEmail(data.email) : null;
+    const byPhone = ph ? db.get('SELECT full_name, school_id FROM users WHERE phone = ? OR username = ?', [ph, ph]) : null;
+    const dup = byPhone || (em ? db.get('SELECT full_name, school_id FROM users WHERE lower(email) = lower(?) OR lower(username) = lower(?)', [em, em]) : null);
+    if (dup) {
+      const what = byPhone ? 'teléfono' : 'correo';
+      // El nombre solo se muestra si la cuenta es de la misma escuela
+      if (dup.school_id === actor.school_id) throw new AppError(`Ya existe una cuenta con ese ${what} (${dup.full_name}). Elíjala como tutor en lugar de crear otra.`, 'DUPLICADO');
+      throw new AppError(`Ese ${what} ya está registrado en otra cuenta.`, 'DUPLICADO');
     }
+    const password = tempPassword();
+    // Adulto que es su propio tutor: además de la cuenta se crea el alumno/nadador con el mismo nombre,
+    // vinculado a esta cuenta, y su plan de mensualidad. Todo o nada (una sola transacción).
+    const sw = data.as_swimmer === true ? {} : (data.as_swimmer && typeof data.as_swimmer === 'object' ? data.as_swimmer : null);
+    let swimmer = null;
+    const u = db.transaction(() => {
+      const nu = svc.createUser(actor, { role: 'tutor', full_name: data.full_name, email: data.email || null, phone: data.phone || null, whatsapp: data.whatsapp || null, password });
+      if (Array.isArray(data.child_ids)) {
+        for (const cid of data.child_ids) svc.updateChild(actor, cid, { tutor_id: nu.id });
+      }
+      if (sw) {
+        swimmer = svc.createChild(actor, { full_name: nu.full_name, tutor_id: nu.id, grade: sw.grade || null, photo: sw.photo || null });
+        if (sw.dias_semana || sw.fecha_inicio || sw.inscripcion_pagada || sw.primer_mes_pagado) {
+          svc.mensSetPlan(actor, { child_id: swimmer.id, dias_semana: sw.dias_semana ? Number(sw.dias_semana) : null, fecha_inicio: sw.fecha_inicio || null,
+            inscripcion_pagada: !!sw.inscripcion_pagada, ...(sw.primer_mes_pagado ? { primer_mes_pagado: true } : {}) });
+        }
+      }
+      return nu;
+    });
+    if (Array.isArray(data.child_ids)) for (const cid of data.child_ids) onChildLinked(Number(cid));
     await mailer.send({ to: u.email || u.phone, channel: u.email ? 'email' : 'sms', subject: 'Tu cuenta de Zuki Pay',
       text: `Hola ${u.full_name}. Tu usuario es ${u.username} y tu contraseña temporal es ${password}. Entra en ${appUrl}. Guárdala en un lugar seguro; si la olvidas, pide una nueva a la escuela.` });
-    return { user: u, temporary_password: password };
+    return { user: u, temporary_password: password, ...(swimmer ? { swimmer } : {}) };
   }
 
   // ----- invitaciones (código por alumno/tarjeta) -----
