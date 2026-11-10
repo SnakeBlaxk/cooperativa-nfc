@@ -6,14 +6,15 @@
 //            ADMIN_USER, ADMIN_PASSWORD, SCHOOL_NAME (primera escuela, opcional),
 //            TURSO_DATABASE_URL + TURSO_AUTH_TOKEN (persistencia gratis en Turso), BACKUP_DIR (copias diarias en modo disco),
 //            LEGACY_SYNC=1 (solo para migrar cajas 1.x: acepta temporalmente su envío de ventas sin conexión)
-//            WhatsApp (WAHA, no Meta): WAHA_URL, WAHA_API_KEY, WAHA_SESSION, WAHA_DASHBOARD_URL, WAHA_SEND_DELAY_MS, WAHA_MX_PREFIX
-//            Sin WAHA_URL y WAHA_API_KEY los avisos de WhatsApp no se envían. Ver docs/whatsapp-waha.md.
+//            WhatsApp (WAHA, no Meta): WAHA_API_KEY (+ WAHA_URL si WAHA está fuera), WAHA_SESSION, WAHA_SEND_DELAY_MS, WAHA_MX_PREFIX,
+//            WAHA_LINK_SCHOOL_IDS. En Docker, server/start.js arranca WAHA en el mismo contenedor. Ver docs/whatsapp-waha.md.
 process.env.TZ = process.env.TZ || 'America/Mexico_City'; // horas de la escuela (México), también en Render
 const path = require('path');
 const fs = require('fs');
 const { createServer } = require('./app');
 const { createTursoStore, createReplicator, dailyFileBackups, persistenceMode } = require('./persist');
 const { openDatabase } = require('../src/core/db');
+const { runShutdownHooks } = require('./lifecycle');
 
 (async () => {
   const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'servidor.db');
@@ -49,7 +50,7 @@ const { openDatabase } = require('../src/core/db');
     if (closing) return; closing = true;
     console.log(`[servidor] ${sig}: guardando y cerrando…`);
     server.close();
-    try { if (replicator) await Promise.race([replicator.flush(), new Promise((r) => setTimeout(r, 20000))]); } catch (_) { /* ya registrado */ }
+    try { await Promise.race([Promise.all([replicator ? replicator.flush() : null, runShutdownHooks()]), new Promise((r) => setTimeout(r, 20000))]); } catch (_) { /* ya registrado */ }
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

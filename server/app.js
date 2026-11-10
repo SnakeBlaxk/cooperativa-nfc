@@ -204,6 +204,12 @@ async function createServer(opts = {}) {
   app.post('/api/sync/invitations', deviceAuth, (req, res) => send(res, () => auth.invitationsForSchool(req.device.school_id, (req.body || {}).child_uuids, { reuse: true, skipLinked: (req.body || {}).include_linked ? false : true })));
 
   // ----- panel del superadministrador (Zuki Company) -----
+  // WhatsApp (conexión del número) para el superadministrador
+  app.post('/api/super-wa/:method', authenticate(), requireRole('superadmin'), (req, res) => {
+    const m = req.params.method;
+    if (!Object.prototype.hasOwnProperty.call(whatsapp.superMethods, m)) return res.status(404).json({ ok: false, error: 'Ruta no encontrada', code: 'NO_ENCONTRADO' });
+    return send(res, () => whatsapp.superMethods[m](req.user, req.body || {}));
+  });
   app.post('/api/super/:method', authenticate(), requireRole('superadmin'), (req, res) => send(res, () => platform.handle(req.user, req.params.method, req.body || {}, ctx(req))));
   // Respaldo descargable de toda la base (archivo SQLite)
   app.get('/api/super-backup', authenticate(), requireRole('superadmin'), (req, res) => {

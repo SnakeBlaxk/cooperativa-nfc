@@ -127,7 +127,7 @@
   // ---------- navegación ----------
   // Menú agrupado por tema: [título del grupo, [[vista, etiqueta, ícono], ...]]
   const NAV = {
-    superadmin: [['Plataforma', [['instituciones', 'Escuelas', '🏫'], ['inventario', 'Mis tarjetas (inventario)', '🪪'], ['cuentas', 'Cuentas', '👥'], ['papelera', 'Papelera', '🗑️']]],
+    superadmin: [['Plataforma', [['instituciones', 'Escuelas', '🏫'], ['inventario', 'Mis tarjetas (inventario)', '🪪'], ['cuentas', 'Cuentas', '👥'], ['papelera', 'Papelera', '🗑️']].concat(WEB ? [['whatsapp', 'WhatsApp', '💬']] : [])],
       ['Seguridad', [['seguridad', 'Seguridad y emergencia', '🛡️'], ['alertas', 'Alertas', '🔔'], ['bitacora', 'Bitácora', '📜']]],
       ['Mi cuenta', [['ajustes', 'Mi cuenta', '👤']]]],
     admin: [['Inicio', [['dashboard', 'Resumen', '📊'], ['notificaciones', 'Notificaciones', '📬']]],
@@ -2520,54 +2520,155 @@
   };
 
   // ----- WhatsApp automático (WAHA, sin API de Meta) -----
-  VIEWS.whatsapp = async (main) => {
-    const st = await call('waStatus');
-    const conn = st.connection || {};
+  // Tarjeta de conexión: estado, QR para vincular (se actualiza solo), código para vincular sin cámara y desvincular.
+  // caller: call (administrador) o la llamada del superadministrador (/api/super-wa).
+  function waConnectionCard(info, caller, reload) {
+    const conn = info.connection || {};
     const badgeCls = conn.status === 'WORKING' ? 'ok' : (conn.status === 'FAILED' || conn.status === 'unreachable' ? 'err' : 'warn');
+    const qrBox = h('div', { class: 'wa-qr', hidden: true });
+    const codeBox = h('div', { class: 'wa-code', hidden: true });
+    const statusLbl = h('span', { class: 'badge ' + badgeCls }, conn.status_label || 'Sin datos');
+    const reput = (el, ...k) => { el.textContent = ''; put(el, ...k); };
+    let timer = null; let tries = 0;
+    const stop = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    onCleanup(stop);
+    const poll = async () => {
+      stop();
+      if (!document.body.contains(qrBox)) return;
+      let r;
+      try { r = await caller('waQr'); } catch (e) { qrBox.textContent = e.message; return; }
+      statusLbl.textContent = r.status_label || r.status || '';
+      if (r.status === 'WORKING') { stop(); toast('WhatsApp conectado', 'ok'); reload(); return; }
+      if (r.image) reput(qrBox, h('img', { src: r.image, alt: 'Código QR para vincular WhatsApp', width: 264, height: 264 }),
+        h('p', { class: 'small muted' }, 'WhatsApp Business → Dispositivos vinculados → Vincular un dispositivo. El código cambia solo cada ~20 s.'));
+      else reput(qrBox, h('p', { class: 'small muted' }, r.error || 'Preparando el código QR…'));
+      if (++tries < 100) timer = setTimeout(poll, 4000);
+      else reput(qrBox, h('p', { class: 'small muted' }, 'El QR expiró. Toque «Vincular WhatsApp» otra vez.'));
+    };
+    const startLink = async () => {
+      const r = await safe(() => caller('waLink'));
+      if (!r) return;
+      if (r.status === 'WORKING') { toast('El WhatsApp ya está conectado', 'ok'); reload(); return; }
+      qrBox.hidden = false; tries = 0; reput(qrBox, h('p', { class: 'small muted' }, 'Preparando el código QR…'));
+      setTimeout(poll, 2500);
+    };
+    const pair = async () => {
+      const phone = h('input', { type: 'tel', placeholder: '10 dígitos', autocomplete: 'off' });
+      modal('Vincular con código', h('div', { class: 'form' },
+        h('p', { class: 'small muted' }, 'Útil si abre esta pantalla en el mismo celular del chip. Después, en WhatsApp Business → Dispositivos vinculados → Vincular un dispositivo → «Vincular con el número de teléfono», escriba el código.'),
+        field('Número del chip (WhatsApp de la academia)', phone)), [
+        { label: 'Cancelar' },
+        { label: 'Pedir código', class: 'primary', onClick: async () => {
+          const r = await safe(() => caller('waPairCode', { phone: phone.value }));
+          if (!r) return false;
+          codeBox.hidden = false;
+          reput(codeBox, h('p', null, 'Código: ', h('b', { class: 'wa-code-value' }, r.code)), h('p', { class: 'small muted' }, 'Escríbalo en WhatsApp Business del chip. Vence en unos minutos.'));
+          return true;
+        } }]);
+    };
+    const unlink = async () => {
+      if (!(await confirmBox('Desvincular WhatsApp', 'Se dejarán de mandar mensajes hasta que se vuelva a vincular un número. ¿Continuar?'))) return;
+      const r = await safe(() => caller('waUnlink'));
+      if (r) { toast('WhatsApp desvinculado', 'ok'); reload(); }
+    };
+    const connected = conn.status === 'WORKING';
+    return h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow', style: { margin: 0 } }, 'Número de WhatsApp'), statusLbl),
+      h('p', { class: 'small muted' }, info.configured ? (connected ? 'Conectado' + (conn.me ? ` como ${conn.me}` : '') + '. Los mensajes salen desde este número.' : 'Todavía no hay un número conectado.') : 'El servidor todavía no tiene WhatsApp activado (falta WAHA_API_KEY). Hasta entonces no se envía ningún mensaje.'),
+      conn.status === 'unreachable' ? h('p', { class: 'small muted' }, 'El servicio de WhatsApp está arrancando o reiniciándose. Espere un minuto y actualice.') : null,
+      info.configured && info.can_link ? h('div', { class: 'row acts-wrap' },
+        connected ? h('button', { class: 'btn danger sm', onclick: unlink }, 'Desvincular')
+          : [h('button', { class: 'btn primary', onclick: startLink }, '📱 Vincular WhatsApp'), h('button', { class: 'btn', onclick: pair }, 'Vincular con código')],
+        h('button', { class: 'btn sm', onclick: reload }, 'Actualizar')) : null,
+      qrBox, codeBox,
+      info.instructions ? h('details', { class: 'small', style: { marginTop: '8px' } }, h('summary', null, '¿Cómo funciona?'),
+        h('ol', { style: { margin: '8px 0 0', paddingLeft: '1.2rem' } }, info.instructions.map((t) => h('li', { style: { marginBottom: '4px' } }, t)))) : null);
+  }
+
+  VIEWS.whatsapp = async (main) => {
+    const reload = () => go('whatsapp');
+    if (state.user.role === 'superadmin') {
+      const superWa = async (m, a) => { const r = await window.coop.superWaCall(m, a || {}); if (!r.ok) throw new Error(r.error); return r.data; };
+      const info = await superWa('waSession');
+      put(main, pageHead('WhatsApp', 'Número de WhatsApp del servidor (WAHA). Lo usan los avisos automáticos de las academias.'),
+        waConnectionCard(info, superWa, reload));
+      return;
+    }
+    const st = await call('waStatus');
     const en = h('input', { type: 'checkbox', checked: !!st.enabled });
     const hour = h('select', null, Array.from({ length: 24 }, (_, hr) => h('option', { value: String(hr), selected: hr === st.send_hour }, `${String(hr).padStart(2, '0')}:00`)));
     const testPhone = h('input', { type: 'tel', placeholder: '10 dígitos' });
     const save = async () => {
       const r = await safe(() => call('waSetSettings', { enabled: en.checked, send_hour: Number(hour.value) }));
-      if (r) { toast(r.enabled ? 'Avisos de WhatsApp activados' : 'Avisos de WhatsApp en pausa', 'ok'); go('whatsapp'); }
+      if (r) { toast(r.enabled ? 'Avisos de WhatsApp activados' : 'Avisos de WhatsApp en pausa', 'ok'); reload(); }
     };
     const test = async () => {
       const r = await safe(() => call('waSendTest', { phone: testPhone.value }));
       if (!r) return;
       if (r.status === 'enviado') toast('Mensaje de prueba enviado a ' + (r.phone_mask || 'el número'), 'ok');
       else toast(r.error || 'No se pudo enviar la prueba', 'err');
-      go('whatsapp');
+      reload();
     };
     const runNow = async () => {
       if (!(await confirmBox('Enviar recordatorios de hoy', 'Se enviarán ahora los recordatorios de mensualidades por vencer o vencidas. No se repiten los que ya salieron hoy.'))) return;
       const r = await safe(() => call('waRunNow'));
       if (!r) return;
       toast(`Listos: ${r.queued || 0} mensaje(s)` + (r.sin_telefono ? `, ${r.sin_telefono} sin teléfono` : ''), 'ok');
-      go('whatsapp');
+      reload();
+    };
+    // Avisos generales
+    const aud = st.broadcast_audience || { con_telefono: 0, sin_telefono: 0, segundos_aprox: 0 };
+    const msg = h('textarea', { rows: 4, maxlength: 1000, placeholder: 'Ej.: Este sábado no hay clases por mantenimiento de la alberca. Gracias.' });
+    const counter = h('span', { class: 'hint' }, '0 / 1000');
+    msg.addEventListener('input', () => { counter.textContent = `${msg.value.length} / 1000`; });
+    const mins = (s) => (s < 60 ? 'menos de un minuto' : (s < 90 ? 'un minuto' : `unos ${Math.round(s / 60)} minutos`));
+    const sendAll = async () => {
+      const text = msg.value.trim();
+      if (text.length < 5) return toast('Escriba el aviso', 'err');
+      const p = await safe(() => call('waBroadcastPreview'));
+      if (!p) return;
+      if (!p.con_telefono) return toast('Ningún papá o tutor tiene teléfono registrado', 'err');
+      const ok = await new Promise((res) => {
+        modal('¿Mandar este aviso?', h('div', null,
+          h('p', null, `Se mandará por WhatsApp a ${p.con_telefono} papá(s)/tutor(es)` + (p.sin_telefono ? ` (${p.sin_telefono} sin teléfono no lo recibirán)` : '') + '.'),
+          h('p', { class: 'small muted' }, `Cada mensaje empieza con «Hola» y el nombre del tutor. Salen uno por uno para cuidar el número: tardará ${mins(p.segundos_aprox)}.`),
+          h('blockquote', { class: 'wa-preview' }, 'Hola (nombre del tutor). ' + text)),
+        [{ label: 'Cancelar', onClick: () => res(false) }, { label: 'Mandar a todos', class: 'primary', onClick: () => res(true) }]);
+      });
+      if (!ok) return;
+      const r = await safe(() => call('waBroadcast', { text, confirm: true }));
+      if (!r) return;
+      toast(`Aviso en camino a ${r.queued} papá(s)/tutor(es)`, 'ok');
+      reload();
     };
     const recent = (st.recent || []);
-    put(main, pageHead('WhatsApp', 'Avisos automáticos al papá o tutor. No usa la API de Meta: el número de la academia se vincula con un código QR.'),
-      h('div', { class: 'card' }, h('div', { class: 'row' }, h('h2', { class: 'grow', style: { margin: 0 } }, 'Conexión'), h('span', { class: 'badge ' + badgeCls }, conn.status_label || 'Sin datos')),
-        h('p', { class: 'small muted' }, st.configured ? `Sesión: ${st.session || 'default'}` + (conn.me ? ` · ${conn.me}` : '') : 'El servidor todavía no tiene WAHA_URL y WAHA_API_KEY. Hasta entonces no se envía ningún mensaje.'),
-        conn.error ? h('p', { class: 'small', style: { color: 'var(--err)' } }, conn.error) : null,
-        st.dashboard_url ? h('p', null, h('a', { class: 'btn primary', href: st.dashboard_url, target: '_blank', rel: 'noopener' }, 'Abrir panel de WAHA (código QR)')) : null,
-        h('ol', { class: 'small', style: { margin: '8px 0 0', paddingLeft: '1.2rem' } }, (st.instructions || []).map((t) => h('li', { style: { marginBottom: '4px' } }, t)))),
+    const bcs = (st.broadcasts || []);
+    put(main, pageHead('WhatsApp', 'Avisos automáticos y avisos generales al papá o tutor desde el número de la academia.'),
+      waConnectionCard(st, call, reload),
       h('div', { class: 'card form', style: { marginTop: '16px' } }, h('h2', null, 'Avisos automáticos'),
-        h('p', { class: 'small muted' }, 'En pausa no sale ningún WhatsApp. La hora es de la Ciudad de México y aplica a los recordatorios de mensualidad. Las compras, rechazos y saldo bajo se envían en el momento, con una espera de unos ' + (st.delay_seconds || 30) + ' segundos entre mensajes.'),
+        h('p', { class: 'small muted' }, 'En pausa no sale ningún aviso automático. La hora es de la Ciudad de México y aplica a los recordatorios de mensualidad. Las compras, rechazos y saldo bajo se envían en el momento, con una espera de unos ' + (st.delay_seconds || 30) + ' segundos entre mensajes.'),
         h('label', { class: 'check' }, en, 'Activar envío automático por WhatsApp'),
         field('Hora del recordatorio diario', hour, 'Solo ese horario. Si el servidor estaba apagado, se intenta mientras dure esa hora.'),
         h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: save }, 'Guardar'),
           st.account_type === 'natacion' ? h('button', { class: 'btn', onclick: runNow, disabled: !st.enabled }, 'Enviar recordatorios de hoy') : null),
         st.last_run_on ? h('p', { class: 'small muted' }, 'Último día de recordatorios: ', st.last_run_on) : null),
+      h('div', { class: 'card form', style: { marginTop: '16px' } }, h('h2', null, '📣 Aviso general'),
+        h('p', { class: 'small muted' }, `Un mensaje para todos los papás/tutores con teléfono (${aud.con_telefono}` + (aud.sin_telefono ? `, ${aud.sin_telefono} sin teléfono` : '') + '). Antes de mandar se pide confirmación.'),
+        h('label', null, 'Mensaje', msg, counter),
+        h('div', null, h('button', { class: 'btn primary', onclick: sendAll, disabled: !(st.connection && st.connection.status === 'WORKING') }, 'Mandar a todos')),
+        st.connection && st.connection.status !== 'WORKING' ? h('p', { class: 'small muted' }, 'Primero vincule el WhatsApp de la academia.') : null,
+        bcs.length ? h('div', { class: 'tablewrap' }, h('table', { class: 'resp' }, h('tr', { class: 'head' }, h('th', null, 'Cuándo'), h('th', null, 'Aviso'), h('th', null, 'Enviados'), h('th', null, 'Fallidos'), h('th', null, 'Pendientes')),
+          bcs.map((b) => h('tr', null, h('td', { 'data-label': 'Cuándo' }, fmtDate(b.created_at)), h('td', { 'data-label': 'Aviso' }, h('div', { class: 'small' }, b.preview)),
+            h('td', { 'data-label': 'Enviados' }, `${b.enviados} de ${b.total}`), h('td', { 'data-label': 'Fallidos' }, String(b.fallidos)), h('td', { 'data-label': 'Pendientes' }, String(b.en_cola)))))) : null),
       h('div', { class: 'card form', style: { marginTop: '16px' } }, h('h2', null, 'Mensaje de prueba'),
-        h('p', { class: 'small muted' }, 'Úselo después de escanear el QR, con un teléfono que tenga WhatsApp. Una prueba por número cada hora.'),
+        h('p', { class: 'small muted' }, 'Úselo después de vincular, con un teléfono que tenga WhatsApp. Una prueba por número cada hora.'),
         field('Teléfono (10 dígitos)', testPhone),
         h('div', null, h('button', { class: 'btn', onclick: test }, 'Enviar prueba'))),
       h('div', { class: 'card tablewrap', style: { marginTop: '16px' } }, h('h2', null, 'Últimos envíos'),
-        recent.length ? h('table', null, h('tr', null, h('th', null, 'Cuándo'), h('th', null, 'Tipo'), h('th', null, 'Número'), h('th', null, 'Estado'), h('th', null, 'Mensaje')),
-          recent.map((r) => h('tr', null, h('td', null, fmtDate(r.created_at)), h('td', null, r.kind_label || r.kind), h('td', null, r.phone_mask || '—'),
-            h('td', null, r.status_label || r.status, r.error ? h('div', { class: 'small', style: { color: 'var(--err)' } }, r.error) : null),
-            h('td', null, h('div', { class: 'small' }, r.preview || '')))))
+        recent.length ? h('table', { class: 'resp' }, h('tr', { class: 'head' }, h('th', null, 'Cuándo'), h('th', null, 'Tipo'), h('th', null, 'Número'), h('th', null, 'Estado'), h('th', null, 'Mensaje')),
+          recent.map((r) => h('tr', null, h('td', { 'data-label': 'Cuándo' }, fmtDate(r.created_at)), h('td', { 'data-label': 'Tipo' }, r.kind_label || r.kind), h('td', { 'data-label': 'Número' }, r.phone_mask || '—'),
+            h('td', { 'data-label': 'Estado' }, r.status_label || r.status, r.error ? h('div', { class: 'small', style: { color: 'var(--err)' } }, r.error) : null),
+            h('td', { 'data-label': 'Mensaje' }, h('div', { class: 'small' }, r.preview || '')))))
           : h('p', { class: 'muted' }, 'Todavía no hay envíos.')));
   };
 

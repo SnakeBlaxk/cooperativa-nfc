@@ -38,14 +38,18 @@ function tursoClient({ url, token, fetchImpl = globalThis.fetch, timeoutMs = 200
   return { pipeline };
 }
 
+// opts.prefix: nombre base de las tablas (por defecto coop_snapshot). La sesión de WhatsApp usa otro prefijo.
 function createTursoStore(opts) {
   const c = tursoClient(opts);
+  const prefix = /^[a-z_]{3,40}$/.test(String(opts.prefix || '')) ? opts.prefix : 'coop_snapshot';
+  const T_CHUNKS = prefix + '_chunks'; const T_HEAD = prefix + '_head';
   const init = () => c.pipeline([
-    ['CREATE TABLE IF NOT EXISTS coop_snapshot_chunks (gen TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (gen, idx))'],
-    ['CREATE TABLE IF NOT EXISTS coop_snapshot_head (id INTEGER PRIMARY KEY CHECK (id = 1), gen TEXT NOT NULL, prev_gen TEXT, chunks INTEGER NOT NULL, bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, saved_at TEXT NOT NULL)'],
+    [`CREATE TABLE IF NOT EXISTS ${T_CHUNKS} (gen TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (gen, idx))`],
+    [`CREATE TABLE IF NOT EXISTS ${T_HEAD} (id INTEGER PRIMARY KEY CHECK (id = 1), gen TEXT NOT NULL, prev_gen TEXT, chunks INTEGER NOT NULL, bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, saved_at TEXT NOT NULL)`],
   ]);
+  let inited = false;
   async function readGen(gen, chunks, sha) {
-    const [rows] = await c.pipeline([['SELECT idx, data FROM coop_snapshot_chunks WHERE gen = ? ORDER BY idx', [gen]]]);
+    const [rows] = await c.pipeline([[`SELECT idx, data FROM ${T_CHUNKS} WHERE gen = ? ORDER BY idx`, [gen]]]);
     if (rows.length !== chunks) throw new Error('copia incompleta');
     const gz = Buffer.from(rows.map((r) => r.data).join(''), 'base64');
     const buf = zlib.gunzipSync(gz);
@@ -53,33 +57,34 @@ function createTursoStore(opts) {
     return buf;
   }
   return {
-    mode: 'turso',
+    mode: 'turso', prefix,
     async load() {
-      await init();
-      const [[head]] = await c.pipeline([['SELECT gen, prev_gen, chunks, bytes, sha256, saved_at FROM coop_snapshot_head WHERE id = 1']]);
+      await init(); inited = true;
+      const [[head]] = await c.pipeline([[`SELECT gen, prev_gen, chunks, bytes, sha256, saved_at FROM ${T_HEAD} WHERE id = 1`]]);
       if (!head) return null;
       try { return await readGen(head.gen, head.chunks, head.sha256); } catch (e) {
         console.error('[persistencia] La última copia en Turso no se pudo leer:', e.message);
         if (!head.prev_gen) throw e;
-        const [[prev]] = await c.pipeline([['SELECT COUNT(*) AS n FROM coop_snapshot_chunks WHERE gen = ?', [head.prev_gen]]]);
+        const [[prev]] = await c.pipeline([[`SELECT COUNT(*) AS n FROM ${T_CHUNKS} WHERE gen = ?`, [head.prev_gen]]]);
         throw new Error(`Copia de Turso dañada (hay una anterior: ${head.prev_gen}, ${prev ? prev.n : 0} partes). Revise manualmente.`);
       }
     },
     async save(buf) {
+      if (!inited) { await init(); inited = true; }
       const sha = crypto.createHash('sha256').update(buf).digest('hex');
       const b64 = zlib.gzipSync(buf, { level: 6 }).toString('base64');
       const parts = []; for (let i = 0; i < b64.length; i += CHUNK_CHARS) parts.push(b64.slice(i, i + CHUNK_CHARS));
       const gen = new Date().toISOString().replace(/[-:.TZ]/g, '') + '-' + crypto.randomBytes(3).toString('hex');
       for (let i = 0; i < parts.length; i += 4) {
-        await c.pipeline(parts.slice(i, i + 4).map((d, k) => ['INSERT INTO coop_snapshot_chunks (gen, idx, data) VALUES (?, ?, ?)', [gen, i + k, d]]));
+        await c.pipeline(parts.slice(i, i + 4).map((d, k) => [`INSERT INTO ${T_CHUNKS} (gen, idx, data) VALUES (?, ?, ?)`, [gen, i + k, d]]));
       }
-      const [[head]] = await c.pipeline([['SELECT gen FROM coop_snapshot_head WHERE id = 1']]);
+      const [[head]] = await c.pipeline([[`SELECT gen FROM ${T_HEAD} WHERE id = 1`]]);
       const prev = head ? head.gen : null;
       await c.pipeline([
-        ['INSERT INTO coop_snapshot_head (id, gen, prev_gen, chunks, bytes, sha256, saved_at) VALUES (1, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET gen = excluded.gen, prev_gen = excluded.prev_gen, chunks = excluded.chunks, bytes = excluded.bytes, sha256 = excluded.sha256, saved_at = excluded.saved_at',
+        [`INSERT INTO ${T_HEAD} (id, gen, prev_gen, chunks, bytes, sha256, saved_at) VALUES (1, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET gen = excluded.gen, prev_gen = excluded.prev_gen, chunks = excluded.chunks, bytes = excluded.bytes, sha256 = excluded.sha256, saved_at = excluded.saved_at`,
           [gen, prev, parts.length, buf.length, sha, new Date().toISOString()]],
         // Se conservan la copia nueva y la anterior (por si una se daña)
-        ['DELETE FROM coop_snapshot_chunks WHERE gen <> ? AND gen IS NOT ?', [gen, prev]],
+        [`DELETE FROM ${T_CHUNKS} WHERE gen <> ? AND gen IS NOT ?`, [gen, prev]],
       ]);
       return { gen, bytes: buf.length, chunks: parts.length };
     },

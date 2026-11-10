@@ -372,6 +372,17 @@ CREATE TABLE IF NOT EXISTS whatsapp_log (
   UNIQUE (school_id, dedupe_key)
 );
 CREATE INDEX IF NOT EXISTS idx_whatsapp_log_school ON whatsapp_log(school_id, id);
+-- Avisos generales por WhatsApp (un mensaje del administrador a todos los papás/tutores con teléfono).
+CREATE TABLE IF NOT EXISTS whatsapp_broadcasts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  school_id INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  created_by INTEGER,
+  total INTEGER NOT NULL DEFAULT 0,
+  sin_telefono INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_broadcasts_school ON whatsapp_broadcasts(school_id, id);
 `;
 
 const SYNC_TABLES = ['users', 'categories', 'products', 'children', 'cards', 'transactions'];

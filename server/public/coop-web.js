@@ -148,6 +148,7 @@
     desktop: !!desk,
     call,
     superCall: (method, args) => authed('/api/super/' + encodeURIComponent(method), args || {}),
+    superWaCall: (method, args) => authed('/api/super-wa/' + encodeURIComponent(method), args || {}),
     info: async () => (desk && desk.info ? { ...(await desk.info()), dbPath: 'Servidor' } : { version: 'web', dbPath: 'Servidor', platform: 'web' }),
     nfcStatus: async () => {
       if (desk && desk.nfcStatus) return desk.nfcStatus();

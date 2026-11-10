@@ -1,64 +1,50 @@
 # WhatsApp automático con WAHA (sin API de Meta)
 
-Los avisos de Cuitswimmer (y de cualquier escuela que los active) salen por **WAHA**: un WhatsApp Web / Baileys con un número propio. No se usa la API de WhatsApp Business de Meta ni sus tokens.
+Los avisos de Cuitswimmer salen por **WAHA** (motor **GOWS**): un WhatsApp vinculado como "dispositivo" a un número propio de la academia. No se usa la API de WhatsApp Business de Meta ni sus tokens. Es una conexión **no oficial**: si se mandan muchos mensajes a gente que no tiene guardado el número, WhatsApp puede bloquearlo.
 
-Hace dos cosas, solo si el administrador las deja **activas**:
+## Qué hace
 
-1. **Una vez al día**, a la hora elegida (horario de la Ciudad de México), escribe al tutor de cada mensualidad **por vencer** (3 días o menos) o **vencida**. El mensaje lleva el nombre del tutor, el del nadador, el monto y la fecha. El mismo aviso no se repite ese día.
-2. **En el momento**, copia los avisos que la app ya manda al tutor: compra, compra rechazada (saldo, límites, tarjeta bloqueada o producto prohibido) y saldo bajo. Hace falta que el tutor tenga teléfono.
+1. **Recordatorios de mensualidad**: una vez al día, a la hora elegida (Ciudad de México), al tutor de cada mensualidad **por vencer** (3 días o menos) o **vencida**. No se repite el mismo día.
+2. **Copia de avisos de la app**: compra, compra rechazada y saldo bajo, si el tutor tiene teléfono.
+3. **Aviso general** (nuevo): el administrador escribe un mensaje y lo manda a todos los papás/tutores con teléfono. Pide confirmación, empieza con "Hola" + nombre del tutor, sale uno por uno (30 s entre mensajes por defecto) y queda el registro de enviados y fallidos.
 
-Entre cada mensaje el servidor espera unos 30 segundos (entre 20 y 60) para no quemar el número. Si `WAHA_URL` o `WAHA_API_KEY` no están puestos, no se envía nada y el resto de Zuki Pay sigue igual.
+Todo en **Configuración → WhatsApp**.
 
-El teléfono se edita en **Alumnos → Editar** o en el perfil del nadador (**Tarjeta y perfil**). Son 10 dígitos de México. Si el campo WhatsApp queda vacío, se usa el teléfono.
+## Cómo corre (mismo servicio de Render, sin costo extra)
+
+El `Dockerfile` usa la imagen oficial `devlikeapro/waha:gows-<versión>` (Node 24) y le agrega Zuki Pay. `server/start.js` es el proceso de Zuki Pay y además vigila a WAHA como proceso hijo:
+
+- Zuki Pay escucha en `$PORT` (lo único público). Cuando ya responde, arranca WAHA en `127.0.0.1:3001` (solo local; además pide `X-Api-Key`).
+- Si Zuki Pay se cae, se cae el contenedor y Render lo reinicia. Si WAHA se cae, se reinicia solo WAHA (máx. 5 veces por hora); los cobros siguen.
+- Panel y Swagger de WAHA apagados. Historial de chats mínimo, sin descargar fotos/audios, grupos y estados ignorados (menos memoria).
+- Memoria (plan 512 MB): medido con la imagen real, sin número vinculado: ≈ 450–470 MB en total (Zuki Pay ~100–115, WAHA ~290, GOWS ~60). Queda poco margen. Si el contenedor pasa de 490 MB (`WAHA_MEM_RESTART_MB`) por más de un rato, se reinicia solo WAHA (máx. 3 por hora) para no tumbar los cobros. Cada ~10 min los logs dicen "[memoria] Contenedor ≈ N MB". Si se vuelve un problema, la salida es mover WAHA a un servicio aparte (USD 7/mes) con `WAHA_EMBEDDED=0` + `WAHA_URL`.
+
+## Vincular el número (desde la app)
+
+1. En el celular del chip: WhatsApp Business con ese número.
+2. En Zuki Pay (administrador de la academia o superadministrador): **WhatsApp → Vincular WhatsApp**. Aparece un QR que se renueva solo.
+3. En el celular: **Dispositivos vinculados → Vincular un dispositivo** y escanear. Si la app está abierta en ese mismo celular, usar **Vincular con código** (WhatsApp → Vincular con el número de teléfono).
+4. El estado cambia a **Conectado**. Mandar un **mensaje de prueba**.
+
+## Reinicios y deploys (la sesión)
+
+La sesión vive en `/app/.sessions`, que en Render sin disco se borra en cada deploy o reinicio. Para no reescanear:
+
+- Si hay Turso (`TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`), la carpeta se respalda **cifrada** (AES-256-GCM, llave derivada de `WAHA_BACKUP_KEY` o, si no hay, de `WAHA_API_KEY`) en las tablas `waha_session_*` de Turso: ~1 min después de conectarse, cada 6 h y al apagar. Al arrancar se restaura antes de iniciar WAHA.
+- Las bases SQLite de la sesión se copian con la API de respaldo de SQLite, así que la copia es consistente aunque WAHA esté corriendo.
+- Si la copia falla o no existe (o cambia la llave), la app muestra "Falta escanear el código QR"/"Sin vincular" y hay que volver a vincular. Si el contenedor muere de golpe (sin apagado limpio), se usa la última copia (hasta 6 h vieja); normalmente sigue funcionando, pero si WhatsApp la rechaza, se vuelve a vincular.
+- Alternativa sin esta copia: disco de Render en `/app/.sessions` (de pago) o PostgreSQL externo con `WHATSAPP_SESSIONS_POSTGRESQL_URL`.
 
 ## Variables (servicio de Zuki Pay en Render)
 
-| Variable | Ejemplo | Para qué |
+| Variable | Valor sugerido | Para qué |
 |---|---|---|
-| `WAHA_URL` | `http://waha:3000` o la URL pública de WAHA | Dirección del API de WAHA, sin barra al final |
-| `WAHA_API_KEY` | una llave larga que usted elija | La misma llave que en el servicio de WAHA (`X-Api-Key`) |
-| `WAHA_SESSION` | `cuitswimmer` | Nombre de la sesión. Si se omite, es `default` |
-| `WAHA_DASHBOARD_URL` | `https://waha.su-dominio.com/dashboard` | Enlace que ve la academia para escanear el QR. Si se omite, se arma con `WAHA_URL` + `/dashboard` |
-| `WAHA_SEND_DELAY_MS` | `30000` | Pausa entre mensajes. Se acota a 20000–60000. Por defecto 30000 |
-| `WAHA_MX_PREFIX` | `52` | Cómo se arma el chat. Por defecto `52` + 10 dígitos (`524431112233@c.us`). Si un mensaje no llega, pruebe `521` (prefijo viejo de móviles que a veces pide Baileys) |
+| `WAHA_API_KEY` | una llave larga aleatoria (secreta) | Activa WAHA en el contenedor y protege su API |
+| `WAHA_SEND_DELAY_MS` | `30000` | Pausa entre mensajes (20000–60000) |
+| `WAHA_MX_PREFIX` | `52` | Probar `521` solo si no llegan a celulares mexicanos |
+| `WAHA_LINK_SCHOOL_IDS` | (vacío) | Escuelas cuyo admin puede vincular; vacío = academias de natación |
+| `WAHA_BACKUP_KEY` | opcional (secreta) | Llave aparte para cifrar la copia de la sesión |
+| `WAHA_URL`, `WAHA_EMBEDDED=0` | no poner | Solo si WAHA se mueve a otro servidor |
+| `WAHA_MAX_OLD_SPACE_MB`, `WAHA_MEM_RESTART_MB` | no poner (128 / 490) | Ajuste fino de memoria |
 
-No guarde estas llaves en el repositorio. En Render van en *Environment* del servicio.
-
-## WAHA en Docker (al lado, o como segundo servicio)
-
-Imagen oficial: `devlikeapro/waha`. Motor **NOWEB** (Baileys, estilo WhatsApp Web).
-
-```yaml
-services:
-  waha:
-    image: devlikeapro/waha:latest
-    ports:
-      - "3001:3000"
-    environment:
-      WAHA_API_KEY: cambie-esta-llave
-      WHATSAPP_DEFAULT_ENGINE: NOWEB
-      WAHA_DASHBOARD_USERNAME: admin
-      WAHA_DASHBOARD_PASSWORD: cambie-esta-clave
-    volumes:
-      - waha-sessions:/app/.sessions
-volumes:
-  waha-sessions:
-```
-
-El volumen es obligatorio: ahí queda la sesión después del QR. Si se borra, hay que escanear otra vez.
-
-En **Render** puede ser un segundo Web Service con la misma imagen, disco persistente montado en `/app/.sessions`, y las variables de arriba. Anote la URL pública (con el usuario y la clave del panel) y póngala en `WAHA_DASHBOARD_URL` del servicio de Zuki Pay. `WAHA_URL` puede ser esa misma URL (sin `/dashboard`) si WAHA es accesible desde Zuki Pay. `WAHA_API_KEY` debe coincidir en los dos servicios.
-
-## Vincular el número (una vez)
-
-1. En el chip nuevo, instale WhatsApp y confirme el número. No use el WhatsApp personal de alguien si puede evitarlo.
-2. Abra el panel (`WAHA_DASHBOARD_URL`), entre y arranque la sesión `WAHA_SESSION`.
-3. Cuando pida el QR: en el celular, WhatsApp → **Ajustes → Dispositivos vinculados → Vincular un dispositivo** y escanée.
-4. Espere el estado **WORKING** (en Zuki Pay se ve como **Conectado**).
-5. En la academia: **Configuración → WhatsApp**. Active los avisos, elija la hora y, si quiere, **Enviar prueba** a su propio celular.
-
-La escuela puede **pausar** los avisos sin desvincular el QR. La hora solo aplica al recordatorio de mensualidad; las compras salen en cuanto ocurren, con la pausa entre mensajes.
-
-## Qué no hace
-
-No cobra la mensualidad, no habla con Meta y no manda avisos de inventario (esos son para la escuela, no para los papás). Un fallo de WAHA queda en *Últimos envíos* y ese aviso no se reintenta el mismo día; al día siguiente, si sigue vencida, se intenta otra vez.
+No guarde llaves en el repositorio.

@@ -79,19 +79,20 @@ function noticeText({ tutorName, childName, kind, title, body, schoolName }) {
   return `${hi}. ${title || ''} ${detail}`.replace(/\s+/g, ' ').trim();
 }
 
-const KIND_LABEL = { mensualidad: 'Mensualidad', compra: 'Compra', saldo_bajo: 'Saldo bajo', rechazada: 'Compra rechazada', prueba: 'Prueba' };
+const KIND_LABEL = { mensualidad: 'Mensualidad', compra: 'Compra', saldo_bajo: 'Saldo bajo', rechazada: 'Compra rechazada', prueba: 'Prueba', aviso_general: 'Aviso general' };
+const BROADCAST_MAX = 1000;
 const LOG_LABEL = { enviado: 'Enviado', error: 'Error', en_cola: 'En cola', sin_telefono: 'Sin teléfono', omitido: 'Omitido' };
 
-function instructions(session) {
+function instructions() {
   return [
-    'Este aviso usa un número de WhatsApp propio de la academia (no la API de Meta). Se vincula una sola vez con un código QR.',
-    'En el celular nuevo, con el chip ya activado, instale WhatsApp y confirme el número.',
-    `Abra el panel de WAHA y arranque la sesión "${session}".`,
-    'Cuando aparezca el código QR, en el celular entre a WhatsApp → Ajustes → Dispositivos vinculados → Vincular un dispositivo, y escanée el QR.',
-    'Espere a que el estado quede en Conectado. La sesión queda guardada en WAHA; no hay que escanear cada día.',
+    'Este aviso usa un número de WhatsApp propio de la academia (no la API de Meta). Se vincula una sola vez.',
+    'En el celular con el chip nuevo, instale WhatsApp Business y confirme el número.',
+    'Aquí mismo toque «Vincular WhatsApp». Aparece un código QR.',
+    'En ese celular: WhatsApp Business → Ajustes (o ⋮) → Dispositivos vinculados → Vincular un dispositivo, y escanee el QR. Si está usando ese mismo celular y no puede escanear, use «Vincular con código».',
+    'Espere a que el estado diga Conectado.',
+    'Si el servidor se reinicia o se publica una versión nueva, la sesión se recupera sola de la copia guardada. Si aun así dice «Falta escanear el código QR» o «Sin vincular», vuelva a vincular aquí.',
     'Active los avisos automáticos y elija la hora (horario de la Ciudad de México). Puede pausarlos cuando quiera.',
     'Los recordatorios de mensualidad salen una vez al día, solo si están por vencer (3 días o menos) o vencidas. El mismo aviso no se repite el mismo día.',
-    'Las compras, las compras rechazadas (saldo, límites, tarjeta bloqueada o producto prohibido) y el saldo bajo se copian a WhatsApp en el momento, si el tutor tiene teléfono.',
   ];
 }
 
@@ -330,7 +331,7 @@ function createWhatsApp(db, opts = {}) {
     const id = requireAdmin(actor);
     const base = publicSettings(id);
     const live = await client.sessionStatus();
-    return { ...base, connection: live, instructions: instructions(base.session), recent: recent(id) };
+    return { ...base, connection: live, can_link: canLink(actor), instructions: instructions(), recent: recent(id), broadcasts: broadcasts(id), broadcast_audience: audience(id).summary };
   }
   async function sendTest(actor, data = {}) {
     const id = requireAdmin(actor);
@@ -353,11 +354,129 @@ function createWhatsApp(db, opts = {}) {
     return runReminders(now(), { force: true, schoolId: id });
   }
 
+  // ----- Vincular el número (QR o código) -----
+  // La sesión de WhatsApp es una sola para todo el servidor: solo el superadministrador y el administrador
+  // de las escuelas en WAHA_LINK_SCHOOL_IDS (o, si no se define, las academias de natación) la pueden cambiar.
+  function canLink(actor) {
+    if (!actor) return false;
+    if (actor.role === 'superadmin') return true;
+    if (actor.role !== 'admin' || !actor.school_id) return false;
+    const ids = String(env.WAHA_LINK_SCHOOL_IDS || '').split(',').map((x) => Number(x.trim())).filter(Boolean);
+    if (ids.length) return ids.includes(Number(actor.school_id));
+    const s = schoolRow(Number(actor.school_id));
+    return !!(s && s.account_type === 'natacion');
+  }
+  function requireLink(actor) {
+    if (!actor) throw new AppError('Sesión no iniciada', 'NO_AUTENTICADO');
+    if (!canLink(actor)) throw new AppError('Solo el administrador de la academia o Zuki Company pueden vincular el WhatsApp', 'PROHIBIDO');
+    if (!client.configured()) throw new AppError('WhatsApp no está configurado en el servidor (falta WAHA_API_KEY).', 'VALIDACION');
+  }
+  function auditLink(actor, action, details) {
+    try { if (audit) audit(actor, action, { details }); } catch (e) { log.error('[whatsapp] bitácora', e.message); }
+  }
+  async function sessionInfo(actor) {
+    if (!actor) throw new AppError('Sesión no iniciada', 'NO_AUTENTICADO');
+    if (actor.role !== 'superadmin') requireAdmin(actor);
+    const live = await client.sessionStatus();
+    return { connection: live, can_link: canLink(actor), configured: client.configured() };
+  }
+  async function link(actor) {
+    requireLink(actor);
+    const r = await client.startSession();
+    if (!r.ok) throw new AppError(r.error || 'No se pudo iniciar la vinculación', 'VALIDACION');
+    auditLink(actor, 'whatsapp_vincular', { estado: r.status });
+    return { status: r.status };
+  }
+  async function qr(actor) {
+    requireLink(actor);
+    const live = await client.sessionStatus();
+    if (live.status !== 'SCAN_QR_CODE') return { status: live.status, status_label: live.status_label, image: null };
+    const r = await client.getQr();
+    return { status: live.status, status_label: live.status_label, image: r.ok ? r.image : null, error: r.ok ? null : r.error };
+  }
+  async function pairCode(actor, data = {}) {
+    requireLink(actor);
+    const e164 = toE164Mx(data.phone);
+    if (!e164) throw new AppError('Escriba el número del chip (10 dígitos de México)', 'VALIDACION');
+    const live = await client.sessionStatus();
+    if (live.status !== 'SCAN_QR_CODE') throw new AppError('Primero toque «Vincular WhatsApp» y espere a que aparezca el QR.', 'VALIDACION');
+    const r = await client.requestCode(e164);
+    if (!r.ok) throw new AppError(r.error || 'No se pudo pedir el código', 'VALIDACION');
+    auditLink(actor, 'whatsapp_codigo', { numero: maskPhone(e164) });
+    return { code: r.code };
+  }
+  async function unlink(actor) {
+    requireLink(actor);
+    const r = await client.logout();
+    if (!r.ok) throw new AppError(r.error || 'No se pudo desvincular', 'VALIDACION');
+    auditLink(actor, 'whatsapp_desvincular', {});
+    return { ok: true };
+  }
+
+  // ----- Avisos generales: un mensaje a todos los papás/tutores con teléfono -----
+  function audience(schoolId) {
+    const rows = db.all(`SELECT u.id, u.full_name, u.phone, u.whatsapp FROM users u
+      WHERE u.school_id = ? AND u.role = 'tutor' AND u.active = 1 AND u.deleted_at IS NULL ORDER BY u.id`, [schoolId]);
+    const seen = new Set(); const list = []; let sinTelefono = 0;
+    for (const u of rows) {
+      const e164 = toE164Mx(u.whatsapp || u.phone);
+      if (!e164) { sinTelefono++; continue; }
+      if (seen.has(e164)) continue; // dos tutores con el mismo número: un solo mensaje
+      seen.add(e164); list.push({ id: u.id, name: u.full_name, e164 });
+    }
+    return { list, summary: { con_telefono: list.length, sin_telefono: sinTelefono, segundos_aprox: list.length * Math.round(delay / 1000) } };
+  }
+  function broadcastText(name, text) {
+    return `${greet(name)}. ${String(text).trim()}`;
+  }
+  function broadcasts(schoolId) {
+    return db.all('SELECT id, body, total, sin_telefono, created_at FROM whatsapp_broadcasts WHERE school_id = ? ORDER BY id DESC LIMIT 10', [schoolId]).map((b) => {
+      const c = db.all("SELECT status, COUNT(*) AS n FROM whatsapp_log WHERE school_id = ? AND dedupe_key LIKE ? GROUP BY status", [schoolId, `aviso:${b.id}:%`]);
+      const by = Object.fromEntries(c.map((x) => [x.status, x.n]));
+      return { id: b.id, preview: String(b.body).slice(0, 180), total: b.total, sin_telefono: b.sin_telefono, created_at: b.created_at,
+        enviados: by.enviado || 0, fallidos: (by.error || 0) + (by.omitido || 0), en_cola: by.en_cola || 0 };
+    });
+  }
+  function broadcastPreview(actor) {
+    const id = requireAdmin(actor);
+    return audience(id).summary;
+  }
+  async function broadcast(actor, data = {}) {
+    const id = requireAdmin(actor);
+    const text = String(data.text || '').trim();
+    if (text.length < 5) throw new AppError('Escriba el aviso (mínimo 5 letras)', 'VALIDACION');
+    if (text.length > BROADCAST_MAX) throw new AppError(`El aviso es muy largo (máximo ${BROADCAST_MAX} caracteres)`, 'VALIDACION');
+    if (data.confirm !== true) throw new AppError('Confirme el envío', 'VALIDACION');
+    if (!client.configured()) throw new AppError('WhatsApp no está configurado en el servidor.', 'VALIDACION');
+    const live = await client.sessionStatus();
+    if (live.status !== 'WORKING') throw new AppError('El WhatsApp de la academia no está conectado. Vincúlelo primero.', 'VALIDACION');
+    const recent = db.get("SELECT id FROM whatsapp_broadcasts WHERE school_id = ? AND body = ? AND created_at >= ?", [id, text, mxParts(new Date(now().getTime() - 3600e3)).ts]);
+    if (recent) throw new AppError('Ese mismo aviso ya se mandó hace menos de una hora.', 'LIMITE');
+    const aud = audience(id);
+    if (!aud.list.length) throw new AppError('Ningún papá o tutor tiene teléfono registrado.', 'VALIDACION');
+    const bid = db.run('INSERT INTO whatsapp_broadcasts (school_id, body, created_by, total, sin_telefono, created_at) VALUES (?,?,?,?,?,?)',
+      [id, text, actor.id || null, aud.list.length, aud.summary.sin_telefono, stamp()]).lastId;
+    let queued = 0;
+    for (const t of aud.list) {
+      const c = claim({ schoolId: id, dedupeKey: `aviso:${bid}:${t.id}`, kind: 'aviso_general', phone: t.e164, body: broadcastText(t.name, text), status: 'en_cola' });
+      if (c.duplicate) continue;
+      scheduleSend(c.id); queued++;
+    }
+    try { if (audit) audit(actor, 'whatsapp_aviso_general', { details: { aviso: bid, destinatarios: queued } }); } catch (e) { log.error('[whatsapp] bitácora', e.message); }
+    return { broadcast_id: bid, queued, sin_telefono: aud.summary.sin_telefono, segundos_aprox: queued * Math.round(delay / 1000) };
+  }
+
   resume();
 
   return {
     client, mxParts, reminderText, noticeText, runReminders, tick, idle, mirrorNotice, resume,
-    methods: { waGetSettings: getSettings, waSetSettings: setSettings, waStatus: status, waSendTest: sendTest, waRunNow: runNow },
+    methods: {
+      waGetSettings: getSettings, waSetSettings: setSettings, waStatus: status, waSendTest: sendTest, waRunNow: runNow,
+      waSession: sessionInfo, waLink: link, waQr: qr, waPairCode: pairCode, waUnlink: unlink,
+      waBroadcastPreview: broadcastPreview, waBroadcast: broadcast,
+    },
+    // Superadministrador (/api/super-wa): solo la conexión del número.
+    superMethods: { waSession: sessionInfo, waLink: link, waQr: qr, waPairCode: pairCode, waUnlink: unlink },
   };
 }
 

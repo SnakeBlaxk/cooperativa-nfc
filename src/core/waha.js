@@ -43,11 +43,10 @@ function sessionName(env) {
   return /^[A-Za-z0-9_-]{1,64}$/.test(s) ? s : 'default';
 }
 
+// Solo si se define WAHA_DASHBOARD_URL (WAHA externo). Con WAHA dentro del mismo servidor el QR se ve en la app.
 function dashboardUrl(env) {
   const explicit = String((env && env.WAHA_DASHBOARD_URL) || '').trim().replace(/\/+$/, '');
-  if (explicit) return explicit;
-  const b = baseUrl(env);
-  return b ? b + '/dashboard' : null;
+  return /^https:\/\//i.test(explicit) ? explicit : null;
 }
 
 function configured(env) {
@@ -73,7 +72,7 @@ const STATUS_LABEL = {
   STOPPED: 'Sesión detenida',
   FAILED: 'Error de sesión',
   unreachable: 'No se pudo contactar a WAHA',
-  missing: 'La sesión no existe en WAHA',
+  missing: 'Sin vincular',
 };
 
 function createWahaClient({ env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 20000 } = {}) {
@@ -122,7 +121,54 @@ function createWahaClient({ env = process.env, fetchImpl = globalThis.fetch, tim
     return { configured: true, session: sessionName(env), status: st, status_label: STATUS_LABEL[st] || st, me, dashboard_url: dashboardUrl(env) };
   }
 
-  return { configured: () => configured(env), sendText, sessionStatus, dashboardUrl: () => dashboardUrl(env), session: () => sessionName(env) };
+  const sessPath = () => '/api/sessions/' + encodeURIComponent(sessionName(env));
+  const notConfigured = () => ({ ok: false, error: 'WhatsApp no está configurado en el servidor (falta WAHA_API_KEY).' });
+
+  // Crea la sesión si no existe y la arranca. Si ya está conectada o esperando QR, no hace nada.
+  async function startSession() {
+    if (!configured(env)) return notConfigured();
+    const cur = await sessionStatus();
+    if (cur.status === 'unreachable') return { ok: false, error: 'WAHA todavía está arrancando. Intente en un minuto.' };
+    if (cur.status === 'WORKING' || cur.status === 'SCAN_QR_CODE' || cur.status === 'STARTING') return { ok: true, status: cur.status };
+    let r;
+    if (cur.status === 'missing') r = await request('/api/sessions', { method: 'POST', body: { name: sessionName(env), start: true } });
+    else if (cur.status === 'FAILED') r = await request(sessPath() + '/restart', { method: 'POST', body: {} });
+    else r = await request(sessPath() + '/start', { method: 'POST', body: {} });
+    if (!r.ok) return { ok: false, error: r.error || 'No se pudo iniciar la sesión' };
+    return { ok: true, status: (r.data && r.data.status) || 'STARTING' };
+  }
+
+  // QR como imagen PNG en base64 (WAHA lo renueva cada ~20 s mientras el estado sea SCAN_QR_CODE).
+  async function getQr() {
+    if (!configured(env)) return notConfigured();
+    const r = await request('/api/' + encodeURIComponent(sessionName(env)) + '/auth/qr?format=image');
+    if (!r.ok) return { ok: false, error: r.error || 'El código QR todavía no está listo' };
+    const d = r.data || {};
+    if (!d.data) return { ok: false, error: 'El código QR todavía no está listo' };
+    const mime = /^image\/(png|jpeg)$/.test(String(d.mimetype || '')) ? d.mimetype : 'image/png';
+    if (!/^[A-Za-z0-9+/=]+$/.test(String(d.data))) return { ok: false, error: 'Respuesta de QR inválida' };
+    return { ok: true, image: 'data:' + mime + ';base64,' + d.data };
+  }
+
+  // Código de 8 letras para vincular sin cámara: WhatsApp → Dispositivos vinculados → Vincular con número de teléfono.
+  async function requestCode(e164) {
+    if (!configured(env)) return notConfigured();
+    const phone = digits(e164).slice(-10);
+    const r = await request('/api/' + encodeURIComponent(sessionName(env)) + '/auth/request-code', { method: 'POST', body: { phoneNumber: '52' + phone } });
+    if (!r.ok) return { ok: false, error: r.error || 'No se pudo pedir el código' };
+    const code = r.data && (r.data.code || r.data.value);
+    if (!code) return { ok: false, error: 'WAHA no devolvió un código' };
+    return { ok: true, code: String(code).slice(0, 20) };
+  }
+
+  async function logout() {
+    if (!configured(env)) return notConfigured();
+    const r = await request(sessPath() + '/logout', { method: 'POST', body: {} });
+    if (!r.ok && r.status !== 404) return { ok: false, error: r.error || 'No se pudo desvincular' };
+    return { ok: true };
+  }
+
+  return { configured: () => configured(env), sendText, sessionStatus, startSession, getQr, requestCode, logout, dashboardUrl: () => dashboardUrl(env), session: () => sessionName(env) };
 }
 
 module.exports = {
