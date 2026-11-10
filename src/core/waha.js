@@ -70,7 +70,7 @@ const STATUS_LABEL = {
   SCAN_QR_CODE: 'Falta escanear el código QR',
   STARTING: 'Conectando…',
   STOPPED: 'Sesión detenida',
-  FAILED: 'Error de sesión',
+  FAILED: 'Sesión cerrada por WhatsApp',
   unreachable: 'No se pudo contactar a WAHA',
   missing: 'Sin vincular',
 };
@@ -93,7 +93,9 @@ function createWahaClient({ env = process.env, fetchImpl = globalThis.fetch, tim
         signal: ctrl,
       });
     } catch (e) {
-      const msg = e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'Tiempo de espera agotado al contactar WAHA' : ((e && e.message) || 'error de red');
+      // «fetch failed» / ECONNREFUSED: WAHA se está reiniciando (p. ej. tras quedarse sin memoria). Mensaje claro.
+      const msg = e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'Tiempo de espera agotado al contactar WhatsApp. Intente en un minuto.'
+        : 'El servicio de WhatsApp se está reiniciando. Espere un minuto e intente de nuevo.';
       return { ok: false, error: msg };
     }
     const raw = await res.text();

@@ -2643,6 +2643,8 @@
       h('div', { class: 'row' }, h('h2', { class: 'grow', style: { margin: 0 } }, 'Número de WhatsApp'), statusLbl),
       h('p', { class: 'small muted' }, info.configured ? (connected ? 'Conectado' + (conn.me ? ` como ${conn.me}` : '') + '. Los mensajes salen desde este número.' : 'Todavía no hay un número conectado.') : 'El servidor todavía no tiene WhatsApp activado (falta WAHA_API_KEY). Hasta entonces no se envía ningún mensaje.'),
       conn.status === 'unreachable' ? h('p', { class: 'small muted' }, 'El servicio de WhatsApp está arrancando o reiniciándose. Espere un minuto y actualice.') : null,
+      conn.status === 'FAILED' ? h('div', { class: 'banner warn small' }, h('span', { class: 'ico' }, '🔌'),
+        h('div', null, 'WhatsApp cerró la sesión de este número (pasa si se quita el dispositivo vinculado en el celular o si WhatsApp limita al número por mandar a contactos nuevos). Toque «📱 Vincular WhatsApp» y escanee el QR otra vez.')) : null,
       connected && conn.reachout_limit && conn.reachout_limit.active ? h('div', { class: 'banner warn small' }, h('span', { class: 'ico' }, '⏳'),
         h('div', null, 'WhatsApp limitó por un tiempo los mensajes a números que nunca han escrito a la academia',
           conn.reachout_limit.ends_at ? ` (hasta ${new Date(conn.reachout_limit.ends_at).toLocaleString('es-MX', { timeZone: 'America/Mexico_City', dateStyle: 'medium', timeStyle: 'short' })})` : '',
