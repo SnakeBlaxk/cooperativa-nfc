@@ -105,3 +105,35 @@ test('editar y borrar un pago por error: el vencimiento regresa y queda auditor�
   assert.equal((await rpc('mensDeletePayment', NAT, { id: last.id })).ok, false);
   assert.equal((await rpc('mensDeletePayment', ESC, { id: p.data.payments[0].id })).ok, false);
 });
+
+test('primer mes pagado al dar de alta: pago con fecha de inicio y vence al mes siguiente', async () => {
+  const c = await rpc('createChild', NAT, { full_name: 'Nadador Primer Mes' });
+  assert.ok(c.ok, c.error);
+  const start = mxDate();
+  // Sin plan no se puede marcar
+  assert.equal((await rpc('mensSetPlan', NAT, { child_id: c.data.id, primer_mes_pagado: true })).ok, false);
+  let p = await rpc('mensSetPlan', NAT, { child_id: c.data.id, dias_semana: 2, fecha_inicio: start, inscripcion_pagada: true, primer_mes_pagado: true });
+  assert.ok(p.ok, p.error);
+  assert.equal(p.data.periodos_pagados, 1);
+  assert.equal(p.data.next_due, addMonths(start, 1));
+  assert.equal(p.data.status, 'al_corriente');
+  assert.equal(p.data.inscripcion_pagada, true);
+  assert.equal(p.data.payments.length, 1);
+  assert.equal(p.data.payments[0].amount_cents, 47000);
+  assert.equal(p.data.payments[0].paid_at, start);
+  assert.equal(p.data.payments[0].period_due, start);
+  // Guardar otra vez con la casilla marcada no duplica el pago
+  p = await rpc('mensSetPlan', NAT, { child_id: c.data.id, dias_semana: 2, fecha_inicio: start, primer_mes_pagado: true });
+  assert.equal(p.data.payments.length, 1); assert.equal(p.data.periodos_pagados, 1);
+  // Desmarcada (por defecto): sin pago
+  const c2 = await rpc('createChild', NAT, { full_name: 'Nadador Sin Primer Mes' });
+  p = await rpc('mensSetPlan', NAT, { child_id: c2.data.id, dias_semana: 2, fecha_inicio: start });
+  assert.equal(p.data.payments.length, 0); assert.equal(p.data.next_due, start);
+  // Ejemplo del usuario: inicio 09/11/2026 → vence 09/12/2026
+  const c3 = await rpc('createChild', NAT, { full_name: 'Nadador Ejemplo' });
+  p = await rpc('mensSetPlan', NAT, { child_id: c3.data.id, dias_semana: 1, fecha_inicio: '2026-11-09', primer_mes_pagado: true });
+  assert.equal(p.data.next_due, '2026-12-09'); assert.equal(p.data.payments[0].paid_at, '2026-11-09'); assert.equal(p.data.payments[0].amount_cents, 33000);
+  // Una escuela normal (no natación) no puede
+  const caj = await rpc('mensSetPlan', ESC, { child_id: c3.data.id, primer_mes_pagado: true });
+  assert.equal(caj.ok, false);
+});

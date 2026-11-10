@@ -895,6 +895,8 @@
       const dias = nat ? h('select', null, h('option', { value: '' }, '— Sin mensualidad —'), [1, 2, 3, 4, 5, 6].map((d) => h('option', { value: d, selected: pl.dias_semana === d }, `${d} día${d > 1 ? 's' : ''} por semana · ${money(mensPrices[d])}/mes`))) : null;
       const inicio = nat ? h('input', { type: 'date', value: pl.fecha_inicio || '' }) : null;
       const inscOk = nat ? h('input', { type: 'checkbox', checked: !!pl.inscripcion_pagada }) : null;
+      // Primer mes pagado: solo mientras no haya ningún pago registrado (alta del nadador). Desmarcada por defecto.
+      const primerOk = nat && !(pl.periodos_pagados > 0) ? h('input', { type: 'checkbox' }) : null;
       const phone = h('input', { type: 'tel', placeholder: '10 dígitos' });
       const wa = h('input', { type: 'tel', placeholder: 'Mismo que el teléfono' });
       const syncContact = () => {
@@ -908,6 +910,7 @@
         h('div', { class: 'grid g2' }, field('Teléfono del tutor', phone, 'México, 10 dígitos.'), waField(wa)),
         nat ? h('div', { class: 'grid g2' }, field('Días por semana', dias), field('Fecha de inicio', inicio, 'Cada mes vence este mismo día.')) : null,
         nat ? h('label', { class: 'check' }, inscOk, 'Inscripción pagada') : null,
+        primerOk ? h('label', { class: 'check', title: 'Registra el pago de la primera mensualidad con la fecha de inicio; el siguiente vencimiento es un mes después.' }, primerOk, 'Primer mes pagado') : null,
         h('div', { class: 'row' }, prev, field('Foto (opcional)', file), h('button', { class: 'btn sm', onclick: () => { photo = null; setPrev(); } }, 'Quitar foto')),
         c ? h('label', { class: 'check' }, active, 'Alumno activo') : null),
       [{ label: 'Cancelar' }, { label: 'Guardar', class: 'primary', onClick: async () => {
@@ -915,7 +918,7 @@
           const data = { full_name: name.value, grade: grade.value, tutor_id: tutor.value ? Number(tutor.value) : null, photo };
           if (tutor.value) { data.tutor_phone = phone.value; data.tutor_whatsapp = wa.value; }
           const saved = c ? await call('updateChild', { id: c.id, ...data, active: active.checked }) : await call('createChild', data);
-          if (nat) await call('mensSetPlan', { child_id: saved.id, dias_semana: dias.value ? Number(dias.value) : null, fecha_inicio: inicio.value || null, inscripcion_pagada: inscOk.checked });
+          if (nat) await call('mensSetPlan', { child_id: saved.id, dias_semana: dias.value ? Number(dias.value) : null, fecha_inicio: inicio.value || null, inscripcion_pagada: inscOk.checked, ...(primerOk && primerOk.checked ? { primer_mes_pagado: true } : {}) });
           toast('Alumno guardado', 'ok'); render();
         } catch (e) { toast(e.message, 'err'); return false; }
       } }]);
