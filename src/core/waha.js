@@ -2,8 +2,8 @@
 // Cliente de WAHA (WhatsApp HTTP API, motor tipo Baileys / WhatsApp Web).
 // No usa la API de WhatsApp Business de Meta. Si WAHA_URL o WAHA_API_KEY no están definidos,
 // todas las operaciones son un no-op (no lanzan error y no llaman a la red).
-// Números de México en E.164: +52 y 10 dígitos. El chatId por defecto es 52XXXXXXXXXX@c.us.
-// WAHA_MX_PREFIX=521 usa el prefijo antiguo de móviles que algunas sesiones Baileys todavía piden.
+// Números de México en E.164: +52 y 10 dígitos. Antes de enviar se pregunta a WAHA (check-exists) si la cuenta
+// existe como 52XXXXXXXXXX o 521XXXXXXXXXX y se usa el chatId que devuelve. WAHA_MX_PREFIX=521 solo cambia cuál se prueba primero.
 
 const DEFAULT_DELAY_MS = 30000;
 const MIN_DELAY_MS = 20000;
@@ -101,13 +101,64 @@ function createWahaClient({ env = process.env, fetchImpl = globalThis.fetch, tim
     return { ok: true, status: res.status, data };
   }
 
-  async function sendText(e164, text) {
-    if (!configured(env)) return { ok: false, skipped: true, reason: 'not_configured' };
-    const chatId = chatIdFor(e164, env);
+  // Móviles de México: según la cuenta, WhatsApp los registra como 52XXXXXXXXXX o 521XXXXXXXXXX.
+  // Antes de enviar se pregunta a WAHA (check-exists) cuál existe y se usa el chatId que devuelve.
+  // Solo se guardan en caché los resultados positivos.
+  const jidCache = new Map();
+  const NOT_ON_WA = /not on whatsapp|no lid found|not registered|no existe en whatsapp/i;
+  const validChatId = (x) => typeof x === 'string' && /^[0-9]{6,20}@(c\.us|s\.whatsapp\.net|lid)$/.test(x);
+  function candidates(ten) {
+    const first = mxPrefix(env) + ten;
+    return [...new Set([first, '52' + ten, '521' + ten])];
+  }
+  async function resolveChatId(e164) {
+    const ten = digits(e164).slice(-10);
+    if (jidCache.has(ten)) return { ok: true, chatId: jidCache.get(ten), verified: true };
+    let negatives = 0; let lastError = null;
+    for (const num of candidates(ten)) {
+      const r = await request('/api/contacts/check-exists?phone=' + num + '&session=' + encodeURIComponent(sessionName(env)));
+      if (!r.ok) {
+        // Endpoint no disponible en este WAHA: se envía como antes, sin verificar.
+        if (r.status === 404 || r.status === 405 || r.status === 501) return { ok: true, chatId: chatIdFor(e164, env), verified: false };
+        if (r.error && NOT_ON_WA.test(r.error)) { negatives++; continue; }
+        lastError = r.error || ('HTTP ' + r.status); continue;
+      }
+      const d = r.data || {};
+      if (typeof d.numberExists !== 'boolean') return { ok: true, chatId: chatIdFor(e164, env), verified: false };
+      if (!d.numberExists) { negatives++; continue; }
+      const chatId = validChatId(d.chatId) ? d.chatId : num + '@c.us';
+      if (jidCache.size > 500) jidCache.clear();
+      jidCache.set(ten, chatId);
+      return { ok: true, chatId, verified: true };
+    }
+    if (negatives && !lastError) {
+      return { ok: false, notOnWhatsapp: true, error: `El número ${ten.slice(0, 3)} ${ten.slice(3, 6)} ${ten.slice(6)} no tiene WhatsApp (se probó con 52 y 521). Revise el número o pida al tutor que confirme su WhatsApp.` };
+    }
+    return { ok: true, chatId: chatIdFor(e164, env), verified: false, warning: lastError };
+  }
+
+  async function postText(chatId, text) {
     const r = await request('/api/sendText', { method: 'POST', body: { session: sessionName(env), chatId, text: String(text || '').slice(0, 4000) } });
     if (!r.ok) return { ok: false, chatId, error: r.error || 'no se pudo enviar', status: r.status };
     const id = r.data && (r.data.id || (r.data.key && r.data.key.id)) || null;
     return { ok: true, chatId, id };
+  }
+
+  async function sendText(e164, text) {
+    if (!configured(env)) return { ok: false, skipped: true, reason: 'not_configured' };
+    const res = await resolveChatId(e164);
+    if (!res.ok) return { ok: false, chatId: null, error: res.error, notOnWhatsapp: true };
+    let out = await postText(res.chatId, text);
+    // Sin verificación previa y WhatsApp dice que no existe: se intenta una vez con el otro prefijo (52 ↔ 521).
+    if (!out.ok && !res.verified && NOT_ON_WA.test(out.error || '')) {
+      const ten = digits(e164).slice(-10);
+      const alt = (res.chatId.startsWith('521' + ten) ? '52' : '521') + ten + '@c.us';
+      const again = await postText(alt, text);
+      if (again.ok) { jidCache.set(ten, alt); return again; }
+      if (NOT_ON_WA.test(again.error || '')) return { ok: false, chatId: alt, notOnWhatsapp: true, error: `El número ${ten.slice(0, 3)} ${ten.slice(3, 6)} ${ten.slice(6)} no tiene WhatsApp (se probó con 52 y 521).` };
+      out = again;
+    }
+    return out;
   }
 
   async function sessionStatus() {
@@ -168,7 +219,7 @@ function createWahaClient({ env = process.env, fetchImpl = globalThis.fetch, tim
     return { ok: true };
   }
 
-  return { configured: () => configured(env), sendText, sessionStatus, startSession, getQr, requestCode, logout, dashboardUrl: () => dashboardUrl(env), session: () => sessionName(env) };
+  return { configured: () => configured(env), sendText, resolveChatId, sessionStatus, startSession, getQr, requestCode, logout, dashboardUrl: () => dashboardUrl(env), session: () => sessionName(env) };
 }
 
 module.exports = {

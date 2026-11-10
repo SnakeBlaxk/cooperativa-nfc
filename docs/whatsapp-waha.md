@@ -48,3 +48,9 @@ La sesión vive en `/app/.sessions`, que en Render sin disco se borra en cada de
 | `WAHA_MAX_OLD_SPACE_MB`, `WAHA_MEM_RESTART_MB` | no poner (128 / 490) | Ajuste fino de memoria |
 
 No guarde llaves en el repositorio.
+
+## Números de México (52 / 521)
+WhatsApp registra algunos móviles de México como `52XXXXXXXXXX` y otros como `521XXXXXXXXXX`.
+Antes de cada envío el servidor consulta `GET /api/contacts/check-exists` (probando 52 y luego 521) y envía al
+`chatId` que devuelve WAHA (puede ser `@c.us` o `@lid`). Si ninguno existe, el envío queda en error con el mensaje
+«no tiene WhatsApp (se probó con 52 y 521)». Una prueba fallida se puede volver a enviar en la misma hora.

@@ -342,7 +342,9 @@ function createWhatsApp(db, opts = {}) {
     const parts = mxParts(now());
     const body = `Hola, este es un mensaje de prueba de ${school.name || 'Zuki Pay'} para ${e164}. Si lo recibió, la conexión de WhatsApp de la academia ya funciona.`;
     const c = claim({ schoolId: id, dedupeKey: `prueba:${e164}:${parts.date}:${parts.hour}`, kind: 'prueba', phone: e164, body, status: 'en_cola' });
-    if (c.duplicate) throw new AppError('Ya se envió una prueba a ese número en esta hora. Intente más tarde.', 'LIMITE');
+    // Una prueba que falló se puede reintentar en la misma hora; una enviada (o en cola) no.
+    if (c.duplicate && c.status === 'error') db.run("UPDATE whatsapp_log SET status = 'en_cola', error = NULL, body = ? WHERE id = ?", [body.slice(0, 1500), c.id]);
+    else if (c.duplicate) throw new AppError('Ya se envió una prueba a ese número en esta hora. Intente más tarde.', 'LIMITE');
     await scheduleSend(c.id);
     const row = db.get('SELECT status, error FROM whatsapp_log WHERE id = ?', [c.id]);
     return { status: row.status, status_label: LOG_LABEL[row.status] || row.status, error: row.error || null, phone_mask: maskPhone(e164) };
