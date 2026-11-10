@@ -107,6 +107,12 @@ function createMensualidades({ db, AppError, requireRole, sch, getChildOrFail, t
       ON CONFLICT(child_id) DO UPDATE SET dias_semana=excluded.dias_semana, fecha_inicio=excluded.fecha_inicio, periodos_pagados=excluded.periodos_pagados,
       inscripcion_pagada=excluded.inscripcion_pagada, inscripcion_fecha=excluded.inscripcion_fecha, updated_at=excluded.updated_at`,
     [c.id, s.id, dias, inicio, periodos, ip, ifecha, ts()]);
+    // "Primer mes pagado" (alta del nadador): registra el pago de la primera mensualidad con fecha de inicio,
+    // como un pago normal (historial y reportes). Solo si todavía no hay ningún periodo pagado.
+    if (data.primer_mes_pagado === true || data.primer_mes_pagado === 1) {
+      if (!dias || !inicio) throw err('Para marcar el primer mes pagado indique días por semana y fecha de inicio');
+      if (!(planRow(c.id).periodos_pagados > 0)) return registerPayment(actor, { child_id: c.id, paid_at: inicio, note: 'Primer mes (alta)' });
+    }
     return getPlan(actor, c.id);
   }
   function registerPayment(actor, data = {}) {
