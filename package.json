@@ -23,7 +23,8 @@
     "e2e:tarjetas": "electron scripts/e2e-tarjetas.js",
     "e2e:bajas": "electron scripts/e2e-bajas.js",
     "e2e:zukipay": "electron scripts/e2e-zukipay.js",
-    "e2e:instalar": "electron scripts/e2e-instalar.js"
+    "e2e:instalar": "electron scripts/e2e-instalar.js",
+    "e2e:eliminar-escuela": "electron scripts/e2e-eliminar-escuela.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

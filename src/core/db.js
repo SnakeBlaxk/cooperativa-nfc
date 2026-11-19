@@ -383,6 +383,19 @@ CREATE TABLE IF NOT EXISTS whatsapp_broadcasts (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_whatsapp_broadcasts_school ON whatsapp_broadcasts(school_id, id);
+-- Respaldo JSON de escuelas eliminadas definitivamente por el superadministrador (para restaurar a mano si fue un error).
+-- Sin columna school_id a propósito: no la alcanza ningún borrado por escuela.
+CREATE TABLE IF NOT EXISTS deleted_schools (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  original_school_id INTEGER NOT NULL,
+  school_uuid TEXT,
+  school_name TEXT NOT NULL,
+  deleted_at TEXT NOT NULL,
+  deleted_by TEXT,
+  counts TEXT,
+  bytes INTEGER,
+  data TEXT NOT NULL
+);
 `;
 
 const SYNC_TABLES = ['users', 'categories', 'products', 'children', 'cards', 'transactions'];

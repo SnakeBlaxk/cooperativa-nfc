@@ -1842,6 +1842,40 @@
         : h('div', { class: 'empty', style: { padding: '16px' } }, 'Aún no hay pagos registrados.'));
   }
 
+  // Eliminar escuela DEFINITIVAMENTE (solo superadministrador): escribir el nombre exacto + contraseña.
+  // Antes de borrar, el servidor guarda un respaldo completo por si fue un error.
+  async function deleteSchoolFlow(s) {
+    const pv = await safe(() => superCall('previewDeleteSchool', { school_id: s.id })); if (!pv) return;
+    const c = pv.counts || {};
+    const name = h('input', { placeholder: pv.school.name, autocomplete: 'off', spellcheck: 'false' });
+    const pass = h('input', { type: 'password', autocomplete: 'current-password' });
+    const n = (v, one, many) => `${v} ${v === 1 ? one : many}`;
+    modal('Eliminar escuela', h('div', { class: 'form' },
+      banner('err', '⚠️', h('b', null, 'Esto no se puede deshacer. '), `Se borra para siempre la escuela "${pv.school.name}" y TODOS sus datos.`),
+      h('p', { style: { margin: 0 } }, 'Se eliminará:'),
+      h('ul', { class: 'small', style: { margin: 0 } },
+        h('li', null, `${n(c.alumnos || 0, 'alumno', 'alumnos')} y ${n(c.papas_tutores || 0, 'cuenta de papá/tutor', 'cuentas de papás/tutores')}`),
+        h('li', null, `${n(c.cuentas_personal || 0, 'cuenta', 'cuentas')} de administrador y cajero de la escuela`),
+        h('li', null, `${n(c.tarjetas || 0, 'tarjeta', 'tarjetas')}, ${n(c.productos || 0, 'producto', 'productos')} y ${n(c.categorias || 0, 'categoría', 'categorías')}`),
+        h('li', null, `${n(c.movimientos || 0, 'movimiento', 'movimientos')} (ventas, recargas y ajustes) y ${n(c.mensualidades_alumnos || 0, 'pago de mensualidad', 'pagos de mensualidad')} de alumnos`),
+        h('li', null, `Pagos de la escuela, avisos, cajas vinculadas, WhatsApp, sesiones abiertas y ajustes de seguridad`)),
+      pv.balance_cents > 0 ? banner('warn', '💰', `Las tarjetas tienen ${money(pv.balance_cents)} de saldo. Ese saldo también se borra; entregue los reembolsos antes de continuar.`) : null,
+      c.papas_tutores_conservados ? h('p', { class: 'small muted', style: { margin: 0 } }, `${n(c.papas_tutores_conservados, 'papá/tutor tiene', 'papás/tutores tienen')} hijos en otra escuela: su cuenta se conserva.`) : null,
+      c.tarjetas_inventario ? h('p', { class: 'small muted', style: { margin: 0 } }, `${n(c.tarjetas_inventario, 'tarjeta', 'tarjetas')} del inventario de Zuki quedarán bloqueadas y sin escuela (se pueden desbloquear en Inventario si se recuperan).`) : null,
+      h('p', { class: 'small', style: { margin: 0 } }, '¿No está seguro? Mejor use ', h('b', null, '⏸️ Pausar ahora'), ' en Mensualidad: nadie de la escuela puede entrar, no se pierde nada y se puede reactivar cuando quiera.'),
+      h('p', { class: 'small muted', style: { margin: 0 } }, 'Se guarda un respaldo de la escuela en el servidor por si fue un error.'),
+      field(`Para confirmar escriba el nombre exacto: ${pv.school.name}`, name),
+      field('Su contraseña de superadministrador', pass)),
+    [{ label: 'Cancelar' }, { label: 'Eliminar escuela para siempre', class: 'danger', onClick: async () => {
+      if (name.value.trim() !== pv.school.name.trim()) { toast('El nombre escrito no coincide', 'err'); return false; }
+      if (!pass.value) { toast('Escriba su contraseña', 'err'); return false; }
+      try {
+        const r = await superCall('deleteSchool', { school_id: s.id, confirm_name: name.value.trim(), password: pass.value });
+        toast(r.message, 'ok'); go('instituciones');
+      } catch (e) { toast(e.message, 'err'); return false; }
+    } }]);
+  }
+
   VIEWS.institucion = async (main, params) => {
     const d = await superCall('schoolDetail', { id: params.id });
     const s = d.school; const st = s.stats;
@@ -1901,7 +1935,12 @@
       h('div', { class: 'card', style: { marginTop: '16px' } }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Códigos de invitación para padres'),
         h('button', { class: 'btn primary sm', onclick: () => safe(genCodes) }, 'Generar hoja para alumnos sin tutor')),
       h('p', { class: 'small muted' }, 'Cada código vincula a un padre/tutor con su hijo(a). Se reutiliza el código vigente si ya existe.'),
-      invRows.length ? respTable([{ label: 'Alumno' }, { label: 'Código' }, { label: 'Estado' }, { label: 'Usado por' }, { label: 'Vence' }], invRows) : h('div', { class: 'empty' }, 'Sin códigos generados')));
+      invRows.length ? respTable([{ label: 'Alumno' }, { label: 'Código' }, { label: 'Estado' }, { label: 'Usado por' }, { label: 'Vence' }], invRows) : h('div', { class: 'empty' }, 'Sin códigos generados')),
+      // Zona de peligro: separada del resto de las acciones
+      h('div', { class: 'card danger-zone', style: { marginTop: '28px' } },
+        h('h2', null, '⚠️ Zona de peligro'),
+        h('p', { class: 'small muted' }, 'Para detener la escuela por un tiempo use “⏸️ Pausar ahora” en Mensualidad (se puede reactivar). Eliminar borra la escuela y todos sus datos para siempre.'),
+        h('button', { class: 'btn danger', onclick: () => deleteSchoolFlow(s) }, '🗑️ Eliminar escuela')));
   };
 
   // Alumnos de una escuela (superadministrador): dar de baja alumnos y papás/tutores
