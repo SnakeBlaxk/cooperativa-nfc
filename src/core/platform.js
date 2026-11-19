@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { STATUSES, isYmd } = require('./billing');
 const { createCardStock } = require('./card-stock');
 const { createRemovals } = require('./removals');
+const { createSchoolDelete } = require('./school-delete');
 const ACCOUNT_TYPES = ['escuela', 'natacion'];
 function tempPassword() {
   const A = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -200,9 +201,11 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
   const BILL = billing ? billing.methods : {};
   const STOCK = createCardStock(db, { security, now }).methods; // inventario de tarjetas (bitácora propia) // mensualidad (registran su propia bitácora)
   const REM = createRemovals(db, { security, now }).methods; // bajas y Papelera de alumnos y tutores (bitácora propia)
+  const DEL = createSchoolDelete(db, { security, now }).methods; // eliminar escuela definitivamente con respaldo (bitácora propia)
   function handle(user, method, args, ctx = {}) {
     need(user);
     const a = args && typeof args === 'object' ? args : {};
+    if (Object.prototype.hasOwnProperty.call(DEL, method)) return DEL[method](user, a, ctx);
     if (Object.prototype.hasOwnProperty.call(REM, method)) return REM[method](user, a, ctx);
     if (Object.prototype.hasOwnProperty.call(SEC, method)) return SEC[method](user, a, ctx);
     if (Object.prototype.hasOwnProperty.call(BILL, method)) return BILL[method](user, a, ctx);
@@ -219,7 +222,7 @@ function createPlatform(db, { svc, sync, auth, security = null, billing = null, 
     }
     return out;
   }
-  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: [...Object.keys(M), ...Object.keys(SEC), ...Object.keys(BILL), ...Object.keys(STOCK), ...Object.keys(REM)] };
+  return { handle, overview, createSchool, updateSchool, schoolDetail, createStaff, resetStaffPassword, setStaffActive, listSchoolChildren, generateInvitations, methods: [...Object.keys(M), ...Object.keys(SEC), ...Object.keys(BILL), ...Object.keys(STOCK), ...Object.keys(REM), ...Object.keys(DEL)] };
 }
 
 module.exports = { createPlatform, tempPassword };

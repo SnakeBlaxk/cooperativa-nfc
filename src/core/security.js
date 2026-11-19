@@ -80,7 +80,7 @@ function createSecurity(db, opts = {}) {
   const safeJson = (s) => { try { return JSON.parse(s); } catch (_) { return s; } };
   const CATEGORIES = {
     recargas: ['recarga', 'recarga_caja', 'ajuste', 'recarga_revertida', 'recarga_marcada'],
-    borrados: ['producto_borrado', 'producto_restaurado'],
+    borrados: ['producto_borrado', 'producto_restaurado', 'escuela_eliminada', 'escuela_eliminar_rechazada', 'respaldo_escuela_descargado'],
     contrasenas: ['contrasena_asignada', 'contrasena_propia', 'superadmin_recuperado'],
     roles: ['rol_cambiado', 'cuenta_activada', 'cuenta_desactivada', 'usuario_creado', 'usuario_editado', 'cuenta_desbloqueada'],
     accesos: ['login', 'login_fallido', 'cuenta_bloqueada_intentos', 'login_rechazado_bloqueo'],
